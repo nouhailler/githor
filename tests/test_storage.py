@@ -6,14 +6,20 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 
+from githor.collectors.languages import compute_breakdown
 from githor.collectors.repositories import build_snapshot
 from githor.errors import GithorError, StorageError
+from githor.models.activity import Commit
 from githor.models.repository import Repository
+from githor.models.snapshot import RepositoryFile
 from githor.storage.database import Database
 from githor.storage.repositories import (
     add_snapshot,
     count_snapshots,
     latest_snapshot,
+    save_commits,
+    save_files,
+    save_languages,
     upsert_repository,
 )
 from githor.storage.tables import (
@@ -404,3 +410,56 @@ def test_latest_snapshot_is_none_without_history(database: Database) -> None:
         row, _ = upsert_repository(session, normalised())
         assert latest_snapshot(session, row.id) is None
         assert count_snapshots(session, row.id) == 0
+
+
+# ── Langages, arborescence et commits ────────────────────────────────────────
+
+
+def test_languages_and_files_belong_to_the_snapshot(database: Database) -> None:
+    with database.session() as session:
+        row, _ = upsert_repository(session, normalised())
+        snapshot = add_snapshot(session, row.id, build_snapshot(normalised()))
+
+        assert save_languages(session, snapshot.id, compute_breakdown({"Python": 3, "CSS": 1})) == 2
+        assert (
+            save_files(
+                session,
+                snapshot.id,
+                [
+                    RepositoryFile(path="README.md", type="blob", size=10),
+                    RepositoryFile(path="src", type="tree"),
+                ],
+            )
+            == 2
+        )
+
+    with database.session() as session:
+        stored = session.get(RepositorySnapshotRow, snapshot.id)
+        assert stored is not None
+        assert {entry.language for entry in stored.languages} == {"Python", "CSS"}
+        assert {entry.path for entry in stored.files} == {"README.md", "src"}
+
+
+def test_commits_are_added_once_across_overlapping_scans(database: Database) -> None:
+    """Deux scans dont les fenêtres se recouvrent ne doivent pas dupliquer un commit."""
+    commits = [
+        Commit(sha="a" * 40, author="nouhailler", committed_at=datetime(2026, 9, 1, tzinfo=UTC)),
+        Commit(sha="b" * 40, author="nouhailler", committed_at=datetime(2026, 9, 2, tzinfo=UTC)),
+    ]
+
+    with database.session() as session:
+        row, _ = upsert_repository(session, normalised())
+        assert save_commits(session, row.id, commits) == 2
+
+    with database.session() as session:
+        newer = [*commits, Commit(sha="c" * 40, committed_at=datetime(2026, 9, 3, tzinfo=UTC))]
+        assert save_commits(session, row.id, newer) == 1
+
+    with database.session() as session:
+        assert len(session.scalars(select(CommitRow)).all()) == 3
+
+
+def test_saving_no_commit_is_a_no_op(database: Database) -> None:
+    with database.session() as session:
+        row, _ = upsert_repository(session, normalised())
+        assert save_commits(session, row.id, []) == 0

@@ -45,6 +45,14 @@ class TimeoutError(GitHubError):  # noqa: A001 — nom explicite dans ce context
     """Délai d'attente dépassé, malgré les tentatives."""
 
 
+class EmptyRepositoryError(GitHubError):
+    """Le dépôt ne contient aucun commit.
+
+    GitHub répond HTTP 409 aux routes qui supposent un historique. Ce n'est pas
+    une panne : c'est un dépôt créé et jamais alimenté.
+    """
+
+
 class InvalidResponseError(GitHubError):
     """Réponse inattendue : JSON illisible ou structure non conforme."""
 

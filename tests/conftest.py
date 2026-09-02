@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from githor import config as config_module
+from githor.github import client as client_module
 from githor.github import token as token_module
 from githor.logging import LOGGER_NAME
 
@@ -47,3 +48,13 @@ def neutralise_gh_cli(monkeypatch: pytest.MonkeyPatch) -> None:
         raise FileNotFoundError("gh est neutralisé pendant les tests")
 
     monkeypatch.setattr(token_module.subprocess, "run", refuse)
+
+
+@pytest.fixture(autouse=True)
+def never_really_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Neutralise l'attente entre deux tentatives du client GitHub.
+
+    Une requête non mockée déclencherait sinon les vraies temporisations de
+    reprise, et la suite mettrait des dizaines de secondes à échouer.
+    """
+    monkeypatch.setattr(client_module.time, "sleep", lambda _: None)

@@ -31,3 +31,29 @@ class RepositorySnapshot(BaseModel):
     size_kb: int = 0
     primary_language: str | None = None
     default_branch: str | None = None
+
+
+class Language(BaseModel):
+    """Part d'un langage dans un repository, à la date du snapshot."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    language: str
+    bytes: int
+    """Valeur brute renvoyée par GitHub, conservée telle quelle."""
+
+    percentage: float
+    """Part calculée sur le total des octets, arrondie au dixième."""
+
+
+class RepositoryFile(BaseModel):
+    """Entrée d'arborescence relevée lors d'un snapshot."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    path: str
+    type: str
+    """``blob`` pour un fichier, ``tree`` pour un répertoire."""
+
+    size: int | None = None
+    """Taille en octets ; nulle pour un répertoire."""

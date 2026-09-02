@@ -6,13 +6,22 @@ Deux gestes distincts, et c'est le cœur du modèle :
 - le **snapshot** est ajouté : c'est une mesure datée, jamais réécrite.
 """
 
+from collections.abc import Sequence
+
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from githor.logging import get_logger
+from githor.models.activity import Commit
 from githor.models.repository import Repository
-from githor.models.snapshot import RepositorySnapshot
-from githor.storage.tables import RepositoryRow, RepositorySnapshotRow
+from githor.models.snapshot import Language, RepositoryFile, RepositorySnapshot
+from githor.storage.tables import (
+    CommitRow,
+    LanguageRow,
+    RepositoryFileRow,
+    RepositoryRow,
+    RepositorySnapshotRow,
+)
 
 logger = get_logger("storage.repositories")
 
@@ -105,3 +114,78 @@ def count_snapshots(session: Session, repository_id: int) -> int:
         .where(RepositorySnapshotRow.repository_id == repository_id)
     )
     return total or 0
+
+
+def save_languages(session: Session, snapshot_id: int, languages: Sequence[Language]) -> int:
+    """Enregistre la répartition des langages d'un snapshot.
+
+    Returns:
+        Le nombre de langages enregistrés.
+    """
+    session.add_all(
+        LanguageRow(
+            snapshot_id=snapshot_id,
+            language=language.language,
+            bytes=language.bytes,
+            percentage=language.percentage,
+        )
+        for language in languages
+    )
+    session.flush()
+    return len(languages)
+
+
+def save_files(session: Session, snapshot_id: int, files: Sequence[RepositoryFile]) -> int:
+    """Enregistre l'arborescence relevée pour un snapshot.
+
+    Returns:
+        Le nombre d'entrées enregistrées.
+    """
+    session.add_all(
+        RepositoryFileRow(
+            snapshot_id=snapshot_id,
+            path=entry.path,
+            type=entry.type,
+            size=entry.size,
+        )
+        for entry in files
+    )
+    session.flush()
+    return len(files)
+
+
+def save_commits(session: Session, repository_id: int, commits: Sequence[Commit]) -> int:
+    """Enregistre les commits encore inconnus d'un repository.
+
+    Un commit est un fait daté : il n'est jamais réécrit, seulement ajouté s'il
+    manque. Les scans successifs peuvent donc se recouvrir sans produire de
+    doublon.
+
+    Returns:
+        Le nombre de commits réellement ajoutés.
+    """
+    if not commits:
+        return 0
+
+    known = set(
+        session.scalars(
+            select(CommitRow.sha).where(
+                CommitRow.repository_id == repository_id,
+                CommitRow.sha.in_([commit.sha for commit in commits]),
+            )
+        ).all()
+    )
+
+    added = [commit for commit in commits if commit.sha not in known]
+    session.add_all(
+        CommitRow(
+            repository_id=repository_id,
+            sha=commit.sha,
+            author=commit.author,
+            message=commit.message,
+            committed_at=commit.committed_at,
+        )
+        for commit in added
+    )
+    session.flush()
+    return len(added)

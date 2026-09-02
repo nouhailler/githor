@@ -18,12 +18,15 @@ from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn
 from rich.table import Table
 
 from githor import __version__
+from githor.collectors.activity import collect_activity
+from githor.collectors.languages import collect_languages
 from githor.collectors.repositories import (
     RepositoryCollection,
     build_snapshot,
     collect_repositories,
     normalise_repository,
 )
+from githor.collectors.structure import collect_structure
 from githor.config import Config, ScanConfig, load_config
 from githor.errors import GithorError
 from githor.github.client import GitHubClient, RateLimit
@@ -34,7 +37,14 @@ from githor.github.user import get_authenticated_login, get_authenticated_user
 from githor.logging import get_logger, setup_logging
 from githor.models.repository import Repository
 from githor.storage.database import Database
-from githor.storage.repositories import add_snapshot, count_snapshots, upsert_repository
+from githor.storage.repositories import (
+    add_snapshot,
+    count_snapshots,
+    save_commits,
+    save_files,
+    save_languages,
+    upsert_repository,
+)
 
 console = Console()
 stderr_console = Console(stderr=True)
@@ -239,7 +249,6 @@ def scan(
                 collection = collect_repositories(client, scope)
         else:
             collection = RepositoryCollection([_fetch_one(client, repository)])
-        quota = client.rate_limit
 
     if not collection.repositories:
         console.print("Aucun repository ne correspond au périmètre configuré.")
@@ -248,16 +257,24 @@ def scan(
 
     console.print(f"Repositories à scanner : [bold]{len(collection.repositories)}[/bold]\n")
 
-    with open_database(config) as database:
+    with (
+        GitHubClient(token.value, api_url=config.github.api_url) as client,
+        open_database(config) as database,
+    ):
         database.create_schema()
-        created, updated, snapshots = _persist(database, collection.repositories)
+        totals = _persist(client, database, collection.repositories, scope)
+        quota = client.rate_limit
 
     console.print(
         f"\n[bold]{len(collection.repositories)}[/bold] repository(s) scanné(s) : "
-        f"{created} nouveau(x), {updated} mis à jour.",
+        f"{totals.created} nouveau(x), {totals.updated} mis à jour.",
         highlight=False,
     )
-    console.print(f"{snapshots} snapshot(s) enregistré(s).", highlight=False)
+    console.print(
+        f"{totals.snapshots} snapshot(s), {totals.languages} langage(s), "
+        f"{totals.files} entrée(s) d'arborescence, {totals.commits} commit(s) ajouté(s).",
+        highlight=False,
+    )
     console.print(f"Base : {config.storage.database}", highlight=False)
     _print_exclusions(collection)
 
@@ -287,15 +304,30 @@ def _fetch_one(client: GitHubClient, name: str) -> Repository:
         raise NotFoundError(f"Repository introuvable : {name}") from exc
 
 
-def _persist(database: Database, repositories: Sequence[Repository]) -> tuple[int, int, int]:
-    """Enregistre les repositories et leurs snapshots.
+@dataclass
+class ScanTotals:
+    """Décompte de ce qu'un scan a écrit."""
 
-    Returns:
-        Le nombre de repositories créés, mis à jour, et de snapshots ajoutés.
+    created: int = 0
+    updated: int = 0
+    snapshots: int = 0
+    languages: int = 0
+    files: int = 0
+    commits: int = 0
+
+
+def _persist(
+    client: GitHubClient,
+    database: Database,
+    repositories: Sequence[Repository],
+    scope: ScanConfig,
+) -> ScanTotals:
+    """Collecte et enregistre, dépôt par dépôt, tout ce que le V0.1 mesure.
+
+    Chaque dépôt est traité dans sa propre transaction : un dépôt en échec
+    n'annule pas le travail déjà accompli sur les précédents.
     """
-    created = 0
-    updated = 0
-    snapshots = 0
+    totals = ScanTotals()
 
     with Progress(
         SpinnerColumn(),
@@ -310,22 +342,34 @@ def _persist(database: Database, repositories: Sequence[Repository]) -> tuple[in
         for repository in repositories:
             progress.update(task, description=repository.full_name)
 
+            languages = collect_languages(client, repository.full_name)
+            structure = collect_structure(client, repository)
+            activity = collect_activity(
+                client, repository.full_name, days=scope.commit_history_days
+            )
+
             with database.session() as session:
                 row, is_new = upsert_repository(session, repository)
-                add_snapshot(session, row.id, build_snapshot(repository))
-                total = count_snapshots(session, row.id)
+                snapshot = add_snapshot(session, row.id, build_snapshot(repository))
+                totals.languages += save_languages(session, snapshot.id, languages)
+                totals.files += save_files(session, snapshot.id, structure.files)
+                totals.commits += save_commits(session, row.id, activity.commits)
+                total_snapshots = count_snapshots(session, row.id)
 
-            created += int(is_new)
-            updated += int(not is_new)
-            snapshots += 1
+            totals.created += int(is_new)
+            totals.updated += int(not is_new)
+            totals.snapshots += 1
 
             marker = "[green]+[/green]" if is_new else "[green]✓[/green]"
             console.print(
-                f"{marker} {repository.full_name} [dim](snapshot {total})[/dim]", highlight=False
+                f"{marker} {repository.full_name} [dim](snapshot {total_snapshots} · "
+                f"{structure.file_count} fichiers · {len(languages)} langages · "
+                f"{activity.total} commits/{scope.commit_history_days}j)[/dim]",
+                highlight=False,
             )
             progress.advance(task)
 
-    return created, updated, snapshots
+    return totals
 
 
 @app.command("repos")

@@ -5,9 +5,9 @@ GitHub, d'en collecter les métadonnées, d'en suivre l'évolution dans le temps
 (*snapshots*), d'en extraire des métriques et de détecter ce qui manque à chaque
 projet (*findings*).
 
-> **État : V0.1 en cours de développement — étapes 1 à 8 sur 13 terminées.**
-> `githor scan` alimente la base et crée un snapshot par dépôt. Langages,
-> structure, activité, findings et exports arrivent aux étapes suivantes.
+> **État : V0.1 en cours de développement — étapes 1 à 9 sur 13 terminées.**
+> `githor scan` collecte métadonnées, langages, arborescence et activité.
+> Les findings, les exports et les rapports arrivent aux étapes suivantes.
 
 ---
 
@@ -209,6 +209,45 @@ githor export --format csv
 githor export --format markdown
 ```
 
+## Ce que le scan collecte
+
+Quatre appels par dépôt, soit environ 310 requêtes pour 77 projets, sur un quota
+horaire de 5 000.
+
+| Collecte | Source | Stocké dans |
+|---|---|---|
+| Métadonnées | `/user/repos` | `repositories` + `repository_snapshots` |
+| Langages | `/repos/…/languages` | `languages` (octets bruts **et** pourcentage) |
+| Arborescence | `/repos/…/git/trees?recursive=1` | `repository_files` |
+| Activité | `/repos/…/commits?since=…` | `commits` |
+
+Trois choix méritent d'être explicités :
+
+- **l'arborescence est récupérée en un seul appel récursif**, et non répertoire
+  par répertoire. Si GitHub la tronque, Githor l'annonce plutôt que de laisser
+  croire à un décompte exact ;
+- **seule la fenêtre configurée est téléchargée** (`commit_history_days`, 90 par
+  défaut). Les décomptes sur 30 et 90 jours ne sont produits que si la fenêtre
+  les couvre : une valeur absente vaut mieux qu'un chiffre faux ;
+- **un commit est un fait daté** : il est ajouté s'il manque, jamais réécrit. Des
+  scans qui se recouvrent ne créent donc aucun doublon.
+
+Un dépôt sans aucun commit — GitHub répond alors HTTP 409 — produit des collectes
+vides, et non une erreur.
+
+### Éléments détectés dans l'arborescence
+
+Githor relève la présence de `README`, `LICENSE`, `CHANGELOG`, `CONTRIBUTING`,
+`CODE_OF_CONDUCT`, `SECURITY`, `docs/`, `tests/`, `src/`, `.github/`,
+`.github/workflows/`, `Dockerfile`, `compose.yaml`, `dependabot`, `package.json`,
+les fichiers de verrouillage, `pyproject.toml`, `requirements.txt`,
+`.editorconfig` et `.gitignore`.
+
+La détection retient **le chemin qui a satisfait le marqueur**, pas un simple
+booléen : un constat pourra ainsi toujours nommer le fichier sur lequel il se
+fonde. La comparaison ignore la casse, mais pas l'orthographe — `Readme.MD` est
+reconnu, `Licence` ne l'est pas.
+
 ## Périmètre du scan
 
 Par défaut, les **forks** et les **dépôts archivés** sont exclus. Rien ne disparaît
@@ -326,12 +365,12 @@ Githor — scan
 
 Repositories à scanner : 77
 
-+ nouhailler/Architecturor (snapshot 1)
-+ nouhailler/Astror (snapshot 1)
++ nouhailler/Architecturor (snapshot 1 · 76 fichiers · 3 langages · 190 commits/90j)
++ nouhailler/Astror (snapshot 1 · 164 fichiers · 4 langages · 94 commits/90j)
 …
 
 77 repository(s) scanné(s) : 77 nouveau(x), 0 mis à jour.
-77 snapshot(s) enregistré(s).
+77 snapshot(s), 286 langage(s), 9827 entrée(s) d'arborescence, 1242 commit(s) ajouté(s).
 ```
 
 `+` signale un dépôt découvert, `✓` un dépôt déjà connu ; le compteur entre

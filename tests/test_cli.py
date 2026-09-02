@@ -431,6 +431,50 @@ def test_db_init_honours_the_configured_path(
 # ── scan ─────────────────────────────────────────────────────────────────────
 
 
+def mock_repository_list(
+    httpx_mock: HTTPXMock, payloads: list[dict[str, object]], *, reusable: bool = False
+) -> None:
+    """Mocke la route de listage des dépôts."""
+    httpx_mock.add_response(url=re.compile(r".*/user/repos.*"), json=payloads, is_reusable=reusable)
+
+
+@pytest.fixture
+def repository_details(httpx_mock: HTTPXMock) -> None:
+    """Mocke les sous-ressources interrogées pour chaque dépôt lors d'un scan.
+
+    Enregistrées après les réponses spécifiques d'un test, elles répondent à
+    tout dépôt sans que chaque test ait à les décrire.
+    """
+    httpx_mock.add_response(
+        url=re.compile(r".*/languages$"), json={"Python": 900, "CSS": 100}, is_reusable=True
+    )
+    httpx_mock.add_response(
+        url=re.compile(r".*/git/trees/.*"),
+        json={
+            "truncated": False,
+            "tree": [
+                {"path": "README.md", "type": "blob", "size": 120},
+                {"path": "src", "type": "tree"},
+                {"path": "src/main.py", "type": "blob", "size": 400},
+            ],
+        },
+        is_reusable=True,
+    )
+    httpx_mock.add_response(
+        url=re.compile(r".*/commits\?.*"),
+        json=[
+            {
+                "sha": "a" * 40,
+                "commit": {
+                    "message": "Premier commit",
+                    "author": {"name": "nouhailler", "date": "2026-09-01T10:00:00Z"},
+                },
+            }
+        ],
+        is_reusable=True,
+    )
+
+
 def snapshot_count(root: Path) -> int:
     """Compte les snapshots enregistrés dans la base du répertoire donné."""
     with sqlite3.connect(root / "data" / "githor.db") as connection:
@@ -438,24 +482,24 @@ def snapshot_count(root: Path) -> int:
 
 
 def test_scan_persists_repositories_and_snapshots(
-    httpx_mock: HTTPXMock, authenticated: None, tmp_path: Path
+    httpx_mock: HTTPXMock, authenticated: None, tmp_path: Path, repository_details: None
 ) -> None:
-    httpx_mock.add_response(json=[repo_payload(), repo_payload(id=2, full_name="nouhailler/b")])
+    mock_repository_list(httpx_mock, [repo_payload(), repo_payload(id=2, full_name="nouhailler/b")])
 
     result = runner.invoke(cli.app, ["scan"])
     output = plain(result.output)
 
     assert result.exit_code == 0
     assert "2 repository(s) scanné(s) : 2 nouveau(x), 0 mis à jour" in output
-    assert "2 snapshot(s) enregistré(s)" in output
+    assert "2 snapshot(s)" in output
     assert snapshot_count(tmp_path) == 2
 
 
 def test_a_second_scan_adds_snapshots_without_duplicating_repositories(
-    httpx_mock: HTTPXMock, authenticated: None, tmp_path: Path
+    httpx_mock: HTTPXMock, authenticated: None, tmp_path: Path, repository_details: None
 ) -> None:
     """La propriété centrale : un scan ajoute une mesure, il n'écrase pas la précédente."""
-    httpx_mock.add_response(json=[repo_payload()], is_reusable=True)
+    mock_repository_list(httpx_mock, [repo_payload()], reusable=True)
 
     runner.invoke(cli.app, ["scan"])
     result = runner.invoke(cli.app, ["scan"])
@@ -470,9 +514,9 @@ def test_a_second_scan_adds_snapshots_without_duplicating_repositories(
 
 
 def test_scan_creates_the_schema_on_the_fly(
-    httpx_mock: HTTPXMock, authenticated: None, tmp_path: Path
+    httpx_mock: HTTPXMock, authenticated: None, tmp_path: Path, repository_details: None
 ) -> None:
-    httpx_mock.add_response(json=[repo_payload()])
+    mock_repository_list(httpx_mock, [repo_payload()])
 
     result = runner.invoke(cli.app, ["scan"])
 
@@ -481,10 +525,10 @@ def test_scan_creates_the_schema_on_the_fly(
 
 
 def test_scan_applies_the_configured_scope(
-    httpx_mock: HTTPXMock, authenticated: None, tmp_path: Path
+    httpx_mock: HTTPXMock, authenticated: None, tmp_path: Path, repository_details: None
 ) -> None:
-    httpx_mock.add_response(
-        json=[repo_payload(), repo_payload(id=2, full_name="nouhailler/f", fork=True)]
+    mock_repository_list(
+        httpx_mock, [repo_payload(), repo_payload(id=2, full_name="nouhailler/f", fork=True)]
     )
 
     result = runner.invoke(cli.app, ["scan"])
@@ -494,7 +538,7 @@ def test_scan_applies_the_configured_scope(
 
 
 def test_scan_of_a_single_repository_resolves_a_short_name(
-    httpx_mock: HTTPXMock, authenticated: None, tmp_path: Path
+    httpx_mock: HTTPXMock, authenticated: None, tmp_path: Path, repository_details: None
 ) -> None:
     httpx_mock.add_response(url=f"{DEFAULT_API_URL}/user", json={"login": "nouhailler"})
     httpx_mock.add_response(
@@ -509,7 +553,7 @@ def test_scan_of_a_single_repository_resolves_a_short_name(
 
 
 def test_scan_of_a_single_repository_accepts_a_full_name(
-    httpx_mock: HTTPXMock, authenticated: None, tmp_path: Path
+    httpx_mock: HTTPXMock, authenticated: None, tmp_path: Path, repository_details: None
 ) -> None:
     httpx_mock.add_response(
         url=f"{DEFAULT_API_URL}/repos/nouhailler/Architecturor", json=repo_payload()
@@ -532,8 +576,10 @@ def test_scan_of_an_unknown_repository_fails(httpx_mock: HTTPXMock, authenticate
     assert "Repository introuvable : NExistePas" in str(result.exception)
 
 
-def test_scan_keeps_progress_off_stdout(httpx_mock: HTTPXMock, authenticated: None) -> None:
-    httpx_mock.add_response(json=[repo_payload()])
+def test_scan_keeps_progress_off_stdout(
+    httpx_mock: HTTPXMock, authenticated: None, repository_details: None
+) -> None:
+    mock_repository_list(httpx_mock, [repo_payload()])
 
     result = runner.invoke(cli.app, ["scan"])
 

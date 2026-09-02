@@ -24,6 +24,7 @@ from githor import __version__
 from githor.github.errors import (
     APIUnavailableError,
     AuthenticationError,
+    EmptyRepositoryError,
     GitHubError,
     InvalidResponseError,
     NotFoundError,
@@ -357,6 +358,10 @@ class GitHubClient:
             raise PermissionError(
                 f"Accès refusé par GitHub (HTTP 403) pour {response.request.url}. "
                 f"{_detail(response)}".strip()
+            )
+        if status == 409:
+            raise EmptyRepositoryError(
+                f"Dépôt sans historique : {response.request.url}. {_detail(response)}".strip()
             )
         if status == 404:
             raise NotFoundError(
