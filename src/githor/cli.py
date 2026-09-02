@@ -6,7 +6,9 @@ exceptions en messages lisibles. La logique métier vit dans les autres couches.
 """
 
 import sys
+from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -15,14 +17,16 @@ from rich.console import Console
 from rich.table import Table
 
 from githor import __version__
+from githor.collectors.repositories import RepositoryCollection, collect_repositories
 from githor.config import Config, load_config
 from githor.errors import GithorError
 from githor.github.client import GitHubClient, RateLimit
 from githor.github.token import find_token, require_token
 from githor.logging import get_logger, setup_logging
+from githor.models.repository import Repository
 
 console = Console()
-error_console = Console(stderr=True)
+stderr_console = Console(stderr=True)
 logger = get_logger("cli")
 
 
@@ -163,6 +167,92 @@ def auth_check() -> None:
     console.print(report)
 
 
+@app.command("repos")
+def repos(
+    include_forks: Annotated[
+        bool,
+        typer.Option("--include-forks", help="Inclut les forks, exclus par défaut."),
+    ] = False,
+    include_archived: Annotated[
+        bool,
+        typer.Option("--include-archived", help="Inclut les dépôts archivés, exclus par défaut."),
+    ] = False,
+) -> None:
+    """Liste les repositories accessibles, après application du périmètre configuré."""
+    config = current_config()
+    scan = config.scan.model_copy(
+        update={
+            "include_forks": config.scan.include_forks or include_forks,
+            "include_archived": config.scan.include_archived or include_archived,
+        }
+    )
+    token = require_token(allow_gh_cli=config.github.use_gh_cli)
+
+    with GitHubClient(token.value, api_url=config.github.api_url) as client:
+        with stderr_console.status("Récupération des repositories…"):
+            collection = collect_repositories(client, scan)
+        quota = client.rate_limit
+
+    if not collection.repositories:
+        console.print("Aucun repository ne correspond au périmètre configuré.")
+        _print_exclusions(collection)
+        return
+
+    console.print(_repositories_table(collection.repositories))
+    console.print(
+        f"\n[bold]{len(collection.repositories)}[/bold] repository(s) "
+        f"sur {collection.total_seen} accessibles.",
+        highlight=False,
+    )
+    _print_exclusions(collection)
+
+    if quota is not None and quota.is_low:
+        console.print(f"[yellow]Quota GitHub bas : {quota.remaining} / {quota.limit}.[/yellow]")
+
+
+def _print_exclusions(collection: RepositoryCollection) -> None:
+    """Détaille ce que le périmètre a écarté, pour que rien ne disparaisse en silence."""
+    excluded: list[str] = []
+    if collection.excluded_forks:
+        excluded.append(f"{collection.excluded_forks} fork(s)")
+    if collection.excluded_archived:
+        excluded.append(f"{collection.excluded_archived} archivé(s)")
+
+    if excluded:
+        console.print(
+            f"[dim]Exclus par le périmètre : {' et '.join(excluded)}. "
+            "Voir --include-forks / --include-archived.[/dim]",
+            highlight=False,
+        )
+
+
+def _repositories_table(repositories: Sequence[Repository]) -> Table:
+    """Construit le tableau récapitulatif des repositories."""
+    table = Table(show_header=True, header_style="bold", box=None, pad_edge=False)
+    table.add_column("Repository")
+    table.add_column("Visibilité")
+    table.add_column("Langage")
+    table.add_column("★", justify="right")
+    table.add_column("Issues", justify="right")
+    table.add_column("Dernier push")
+
+    for repository in repositories:
+        table.add_row(
+            repository.full_name,
+            repository.visibility,
+            repository.language or "—",
+            str(repository.stars),
+            str(repository.open_issues_count),
+            _format_date(repository.pushed_at),
+        )
+    return table
+
+
+def _format_date(moment: datetime | None) -> str:
+    """Formate une date pour l'affichage, ou un tiret si elle est absente."""
+    return moment.strftime("%Y-%m-%d") if moment else "—"
+
+
 def _quota_summary(quota: RateLimit) -> str:
     """Formate le quota et, s'il est bas, l'échéance de sa réinitialisation."""
     summary = f"{quota.remaining} / {quota.limit}"
@@ -183,16 +273,16 @@ def main() -> int:
     except GithorError as exc:
         if state.debug:
             raise
-        error_console.print(f"[red]Erreur :[/red] {exc}")
+        stderr_console.print(f"[red]Erreur :[/red] {exc}")
         return 1
     except KeyboardInterrupt:
-        error_console.print("[yellow]Interrompu.[/yellow]")
+        stderr_console.print("[yellow]Interrompu.[/yellow]")
         return 130
     except Exception as exc:  # noqa: BLE001 — dernier rempart avant l'utilisateur
         if state.debug:
             raise
-        error_console.print(f"[red]Erreur inattendue :[/red] {exc}")
-        error_console.print("[dim]Relancez avec --debug pour la trace complète.[/dim]")
+        stderr_console.print(f"[red]Erreur inattendue :[/red] {exc}")
+        stderr_console.print("[dim]Relancez avec --debug pour la trace complète.[/dim]")
         return 1
     return 0
 

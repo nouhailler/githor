@@ -285,3 +285,104 @@ def test_config_show_reports_the_token_source_from_gh(
     result = runner.invoke(cli.app, ["config", "show"])
 
     assert "gh CLI" in plain(result.output)
+
+
+# ── repos ────────────────────────────────────────────────────────────────────
+
+REPO_PAYLOAD = {
+    "id": 1,
+    "name": "Architecturor",
+    "full_name": "nouhailler/Architecturor",
+    "owner": {"login": "nouhailler"},
+    "html_url": "https://github.com/nouhailler/Architecturor",
+    "visibility": "public",
+    "language": "TypeScript",
+    "stargazers_count": 12,
+    "open_issues_count": 4,
+    "pushed_at": "2026-08-24T17:59:00Z",
+}
+
+
+def repo_payload(**overrides: object) -> dict[str, object]:
+    """Construit une charge utile de repository pour les tests de la CLI."""
+    return {**REPO_PAYLOAD, **overrides}
+
+
+def test_repos_lists_repositories(httpx_mock: HTTPXMock, authenticated: None) -> None:
+    httpx_mock.add_response(json=[repo_payload()])
+
+    result = runner.invoke(cli.app, ["repos"])
+    output = plain(result.output)
+
+    assert result.exit_code == 0
+    assert "nouhailler/Architecturor" in output
+    assert "TypeScript" in output
+    assert "2026-08-24" in output
+    assert "1 repository(s) sur 1 accessibles" in output
+
+
+def test_repos_excludes_forks_and_archived_by_default(
+    httpx_mock: HTTPXMock, authenticated: None
+) -> None:
+    httpx_mock.add_response(
+        json=[
+            repo_payload(),
+            repo_payload(id=2, name="f", full_name="nouhailler/f", fork=True),
+            repo_payload(id=3, name="a", full_name="nouhailler/a", archived=True),
+        ]
+    )
+
+    result = runner.invoke(cli.app, ["repos"])
+    output = plain(result.output)
+
+    assert "nouhailler/f" not in output
+    assert "nouhailler/a" not in output
+    assert "1 repository(s) sur 3 accessibles" in output
+    assert "1 fork(s) et 1 archivé(s)" in output
+
+
+def test_repos_can_include_forks(httpx_mock: HTTPXMock, authenticated: None) -> None:
+    httpx_mock.add_response(
+        json=[repo_payload(), repo_payload(id=2, name="f", full_name="nouhailler/f", fork=True)]
+    )
+
+    result = runner.invoke(cli.app, ["repos", "--include-forks"])
+
+    assert "nouhailler/f" in plain(result.output)
+
+
+def test_repos_can_include_archived(httpx_mock: HTTPXMock, authenticated: None) -> None:
+    httpx_mock.add_response(
+        json=[repo_payload(id=3, name="a", full_name="nouhailler/a", archived=True)]
+    )
+
+    result = runner.invoke(cli.app, ["repos", "--include-archived"])
+
+    assert "nouhailler/a" in plain(result.output)
+
+
+def test_repos_reports_an_empty_scope(httpx_mock: HTTPXMock, authenticated: None) -> None:
+    httpx_mock.add_response(json=[])
+
+    result = runner.invoke(cli.app, ["repos"])
+
+    assert result.exit_code == 0
+    assert "Aucun repository" in plain(result.output)
+
+
+def test_repos_requires_a_token(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(cli.app, ["repos"])
+
+    assert result.exit_code != 0
+    assert isinstance(result.exception, AuthenticationError)
+
+
+def test_repos_keeps_progress_off_stdout(httpx_mock: HTTPXMock, authenticated: None) -> None:
+    """La progression part sur stderr : stdout reste exploitable en redirection."""
+    httpx_mock.add_response(json=[repo_payload()])
+
+    result = runner.invoke(cli.app, ["repos"])
+
+    assert "Récupération des repositories" not in plain(result.stdout)

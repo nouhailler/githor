@@ -5,9 +5,9 @@ GitHub, d'en collecter les métadonnées, d'en suivre l'évolution dans le temps
 (*snapshots*), d'en extraire des métriques et de détecter ce qui manque à chaque
 projet (*findings*).
 
-> **État : V0.1 en cours de développement — étapes 1 à 5 sur 13 terminées.**
-> `githor auth check` fonctionne. Les commandes d'inventaire et de scan
-> décrites dans « Utilisation » arrivent aux étapes suivantes.
+> **État : V0.1 en cours de développement — étapes 1 à 6 sur 13 terminées.**
+> `githor auth check` et `githor repos` fonctionnent. La persistance SQLite,
+> les snapshots, les findings et les exports arrivent aux étapes suivantes.
 
 ---
 
@@ -178,6 +178,9 @@ githor config show
 githor --help                     # aide générale
 githor --version                  # version de Githor
 githor auth check                 # vérifie le jeton, l'API et le quota
+githor repos                      # liste les repositories accessibles
+githor repos --include-forks      # y compris les forks
+githor repos --include-archived   # y compris les dépôts archivés
 githor config show                # configuration effective et provenance du jeton
 githor --config f.toml <cmd>      # utilise un fichier de configuration précis
 githor --debug <commande>         # logs détaillés et traceback complète en cas d'erreur
@@ -197,7 +200,6 @@ Statut       OK
 ### Cible de la V0.1
 
 ```bash
-githor repos                      # liste les repositories accessibles
 githor scan                       # scanne tout et alimente SQLite
 githor scan Architecturor         # scanne un seul repository
 githor report Architecturor       # rapport Markdown d'un repository
@@ -205,6 +207,35 @@ githor export --format json       # exports dans data/exports/
 githor export --format csv
 githor export --format markdown
 ```
+
+## Périmètre du scan
+
+Par défaut, les **forks** et les **dépôts archivés** sont exclus. Rien ne disparaît
+en silence : le nombre d'exclusions est toujours affiché, avec le moyen de les
+réintégrer.
+
+```console
+$ githor repos
+Repository                Visibilité  Langage     ★  Issues  Dernier push
+nouhailler/Architecturor  public      TypeScript  0       0  2026-08-24
+nouhailler/Astror         public      JavaScript  0       0  2026-08-30
+…
+
+77 repository(s) sur 78 accessibles.
+Exclus par le périmètre : 1 fork(s). Voir --include-forks / --include-archived.
+```
+
+Le périmètre se règle durablement dans la configuration, ou ponctuellement par
+options :
+
+```toml
+[scan]
+include_forks = false
+include_archived = false
+```
+
+La progression et les journaux partent sur `stderr` : `githor repos > liste.txt`
+produit un fichier exploitable.
 
 ## Structure du projet
 
@@ -220,8 +251,8 @@ githor export --format markdown
 │   ├── errors.py     # exceptions applicatives (messages destinés à l'utilisateur)
 │   ├── logging.py    # configuration du logging (Rich, stderr)
 │   ├── github/       # client HTTP, résolution du jeton, erreurs
-│   ├── models/       # modèles normalisés (repository, snapshot, activity)
-│   ├── collectors/   # repositories, languages, structure, activity
+│   ├── models/       # modèles normalisés (repository ; snapshot, activity à venir)
+│   ├── collectors/   # repositories (langages, structure, activité à venir)
 │   ├── storage/      # SQLAlchemy : schéma et accès SQLite
 │   ├── exporters/    # JSON, CSV, Markdown
 │   └── utils/        # dates et helpers

@@ -20,3 +20,28 @@ def from_epoch(seconds: float) -> datetime:
         seconds: horodatage Unix, tel que renvoyé par l'en-tête X-RateLimit-Reset.
     """
     return datetime.fromtimestamp(seconds, tz=UTC)
+
+
+def parse_datetime(value: str | None) -> datetime | None:
+    """Convertit une date ISO 8601 renvoyée par GitHub en datetime UTC.
+
+    GitHub émet des dates de la forme ``2026-08-01T10:30:00Z``. Certaines dates
+    sont légitimement nulles — ``pushed_at`` d'un dépôt vide, par exemple.
+
+    Args:
+        value: chaîne ISO 8601, ou ``None``.
+
+    Returns:
+        La date en UTC, ou ``None`` si l'entrée est vide.
+
+    Raises:
+        ValueError: si la chaîne n'est pas une date ISO 8601 exploitable.
+    """
+    if value is None or not value.strip():
+        return None
+
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is None:
+        # GitHub date toujours en UTC ; une date naïve est donc de l'UTC.
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
