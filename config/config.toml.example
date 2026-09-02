@@ -1,0 +1,19 @@
+# Githor — configuration
+#
+# Copier ce fichier vers config/config.toml puis adapter si nécessaire.
+# Ce fichier ne doit JAMAIS contenir de secret : le token GitHub est lu
+# exclusivement depuis la variable d'environnement GITHUB_TOKEN.
+
+[github]
+api_url = "https://api.github.com"
+
+[scan]
+include_forks = false
+include_archived = false
+commit_history_days = 90
+
+[storage]
+database = "data/githor.db"
+
+[export]
+directory = "data/exports"

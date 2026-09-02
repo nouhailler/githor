@@ -1,0 +1,42 @@
+# ── Environnements Python ────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+
+# ── Artefacts Python ─────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.eggs/
+
+# ── Outils ───────────────────────────────────────────────────────────────────
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# ── Données locales (jamais versionnées) ─────────────────────────────────────
+data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm
+data/exports/*
+data/cache/*
+!data/exports/.gitkeep
+!data/cache/.gitkeep
+
+# ── Secrets et configuration locale ──────────────────────────────────────────
+# Le token GitHub vit uniquement dans la variable d'environnement GITHUB_TOKEN.
+.env
+*.env
+config/config.toml
+
+# ── Divers ───────────────────────────────────────────────────────────────────
+*.log
+*.swp
+.DS_Store
+.idea/
+.vscode/
