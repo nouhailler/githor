@@ -46,6 +46,9 @@ class GitHubConfig(BaseModel):
 
     api_url: str = "https://api.github.com"
 
+    use_gh_cli: bool = True
+    """Autorise le repli sur ``gh auth token`` quand ``GITHUB_TOKEN`` est absent."""
+
     @field_validator("api_url")
     @classmethod
     def _check_api_url(cls, value: str) -> str:
@@ -200,23 +203,9 @@ def load_config(path: Path | None = None, *, base_dir: Path | None = None) -> Co
 
 
 def get_github_token() -> str | None:
-    """Retourne le token GitHub, ou ``None`` s'il n'est pas défini.
+    """Retourne le token de l'environnement, ou ``None`` s'il n'est pas défini.
 
-    Le token n'est jamais journalisé ni persisté.
+    Le token n'est jamais journalisé ni persisté. Pour la résolution complète,
+    qui sait aussi interroger la CLI ``gh``, voir :mod:`githor.github.token`.
     """
     return os.environ.get(GITHUB_TOKEN_ENV, "").strip() or None
-
-
-def require_github_token() -> str:
-    """Retourne le token GitHub ou échoue avec un message actionnable.
-
-    Raises:
-        ConfigError: si ``GITHUB_TOKEN`` est absent ou vide.
-    """
-    token = get_github_token()
-    if not token:
-        raise ConfigError(
-            f"La variable d'environnement {GITHUB_TOKEN_ENV} n'est pas définie.\n"
-            f'Définissez-la avec : export {GITHUB_TOKEN_ENV}="votre_token"'
-        )
-    return token

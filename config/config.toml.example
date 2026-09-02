@@ -20,6 +20,12 @@
 # Racine de l'API. À changer pour une instance GitHub Enterprise.
 api_url = "https://api.github.com"
 
+# Si GITHUB_TOKEN est absent, demander son jeton à la CLI gh (« gh auth token »).
+# Évite d'exporter le jeton en permanence — ce qui serait risqué, gh préférant
+# GITHUB_TOKEN à son propre trousseau. Mettre à false pour n'utiliser que
+# la variable d'environnement.
+use_gh_cli = true
+
 [scan]
 include_forks = false
 include_archived = false

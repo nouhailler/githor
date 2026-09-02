@@ -6,11 +6,15 @@ from pathlib import Path
 
 import pytest
 import typer
+from pytest_httpx import HTTPXMock
 from typer.testing import CliRunner
 
 from githor import __version__, cli
 from githor.config import GITHUB_TOKEN_ENV
 from githor.errors import ConfigError
+from githor.github.client import DEFAULT_API_URL
+from githor.github.errors import AuthenticationError
+from githor.github.token import ResolvedToken, TokenSource
 
 runner = CliRunner()
 
@@ -169,3 +173,115 @@ def test_config_show_reports_invalid_file(tmp_path: Path, monkeypatch: pytest.Mo
 
     assert result.exit_code != 0
     assert isinstance(result.exception, ConfigError)
+
+
+# ── auth check ───────────────────────────────────────────────────────────────
+
+USER_PAYLOAD = {"login": "nouhailler"}
+RATE_LIMIT_PAYLOAD = {
+    "resources": {"core": {"limit": 5000, "remaining": 4980, "used": 20, "reset": 4102444800}}
+}
+
+
+@pytest.fixture
+def authenticated(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Place un jeton dans l'environnement et isole le répertoire de travail."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(GITHUB_TOKEN_ENV, "ghp_jeton_de_test")
+
+
+def test_auth_check_reports_user_and_quota(httpx_mock: HTTPXMock, authenticated: None) -> None:
+    httpx_mock.add_response(url=f"{DEFAULT_API_URL}/user", json=USER_PAYLOAD)
+    httpx_mock.add_response(url=f"{DEFAULT_API_URL}/rate_limit", json=RATE_LIMIT_PAYLOAD)
+
+    result = runner.invoke(cli.app, ["auth", "check"])
+    output = plain(result.output)
+
+    assert result.exit_code == 0
+    assert "nouhailler" in output
+    assert "4980 / 5000" in output
+    assert "OK" in output
+
+
+def test_auth_check_never_prints_the_token(httpx_mock: HTTPXMock, authenticated: None) -> None:
+    httpx_mock.add_response(url=f"{DEFAULT_API_URL}/user", json=USER_PAYLOAD)
+    httpx_mock.add_response(url=f"{DEFAULT_API_URL}/rate_limit", json=RATE_LIMIT_PAYLOAD)
+
+    result = runner.invoke(cli.app, ["auth", "check"])
+
+    assert "ghp_jeton_de_test" not in plain(result.output)
+    assert f"configuré ({GITHUB_TOKEN_ENV})" in plain(result.output)
+
+
+def test_auth_check_sends_the_token_as_a_bearer(httpx_mock: HTTPXMock, authenticated: None) -> None:
+    httpx_mock.add_response(url=f"{DEFAULT_API_URL}/user", json=USER_PAYLOAD)
+    httpx_mock.add_response(url=f"{DEFAULT_API_URL}/rate_limit", json=RATE_LIMIT_PAYLOAD)
+
+    runner.invoke(cli.app, ["auth", "check"])
+
+    request = httpx_mock.get_request(url=f"{DEFAULT_API_URL}/user")
+    assert request is not None
+    assert request.headers["authorization"] == "Bearer ghp_jeton_de_test"
+
+
+def test_auth_check_fails_without_any_token(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(cli.app, ["auth", "check"])
+
+    assert result.exit_code != 0
+    assert isinstance(result.exception, AuthenticationError)
+    assert "gh auth login" in str(result.exception)
+
+
+def test_auth_check_reports_an_invalid_token(httpx_mock: HTTPXMock, authenticated: None) -> None:
+    httpx_mock.add_response(status_code=401, json={"message": "Bad credentials"})
+
+    result = runner.invoke(cli.app, ["auth", "check"])
+
+    assert result.exit_code != 0
+    assert isinstance(result.exception, AuthenticationError)
+
+
+def test_auth_check_warns_on_a_low_quota(httpx_mock: HTTPXMock, authenticated: None) -> None:
+    low = {"resources": {"core": {"limit": 5000, "remaining": 40, "used": 4960, "reset": 0}}}
+    httpx_mock.add_response(url=f"{DEFAULT_API_URL}/user", json=USER_PAYLOAD)
+    httpx_mock.add_response(url=f"{DEFAULT_API_URL}/rate_limit", json=low)
+
+    result = runner.invoke(cli.app, ["auth", "check"])
+    output = plain(result.output)
+
+    assert result.exit_code == 0
+    assert "40 / 5000" in output
+    assert "réinitialisation" in output
+
+
+def test_auth_check_uses_the_configured_api_url(
+    httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(GITHUB_TOKEN_ENV, "ghp_jeton_de_test")
+    config = tmp_path / "entreprise.toml"
+    config.write_text('[github]\napi_url = "https://github.example.com/api/v3"\n', encoding="utf-8")
+
+    httpx_mock.add_response(url="https://github.example.com/api/v3/user", json=USER_PAYLOAD)
+    httpx_mock.add_response(
+        url="https://github.example.com/api/v3/rate_limit", json=RATE_LIMIT_PAYLOAD
+    )
+
+    result = runner.invoke(cli.app, ["--config", str(config), "auth", "check"])
+
+    assert result.exit_code == 0
+
+
+def test_config_show_reports_the_token_source_from_gh(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "find_token", lambda **_: ResolvedToken("x", TokenSource.GH_CLI))
+
+    result = runner.invoke(cli.app, ["config", "show"])
+
+    assert "gh CLI" in plain(result.output)

@@ -5,9 +5,9 @@ GitHub, d'en collecter les métadonnées, d'en suivre l'évolution dans le temps
 (*snapshots*), d'en extraire des métriques et de détecter ce qui manque à chaque
 projet (*findings*).
 
-> **État : V0.1 en cours de développement — étapes 1 à 4 sur 13 terminées.**
-> Le socle, la CLI, la configuration et le client GitHub sont en place.
-> Les sous-commandes GitHub décrites dans « Utilisation » arrivent aux étapes suivantes.
+> **État : V0.1 en cours de développement — étapes 1 à 5 sur 13 terminées.**
+> `githor auth check` fonctionne. Les commandes d'inventaire et de scan
+> décrites dans « Utilisation » arrivent aux étapes suivantes.
 
 ---
 
@@ -85,14 +85,39 @@ githor --help
 
 ## Configuration
 
-### Token GitHub
+### Jeton GitHub
+
+Githor cherche un jeton dans cet ordre :
+
+1. la variable d'environnement **`GITHUB_TOKEN`** ;
+2. la **CLI `gh`**, via `gh auth token`, si elle est installée et authentifiée.
+
+Si vous utilisez déjà `gh` pour vos `git push`, **vous n'avez rien à faire** :
 
 ```bash
-export GITHUB_TOKEN="ghp_..."
+gh auth login     # une seule fois, si ce n'est pas déjà fait
+githor auth check
 ```
 
-Le token n'est jamais affiché, ni journalisé, ni persisté.
-Pour le rendre permanent, ajoutez la ligne à `~/.bashrc` (hors du dépôt).
+> ⚠️ **N'exportez pas `GITHUB_TOKEN` en permanence dans `~/.bashrc`.** `gh` lit
+> lui-même cette variable et la préfère à son trousseau : un jeton restreint
+> exporté là ferait échouer vos `git push`, ainsi que tout autre outil s'appuyant
+> sur `gh`. Le repli automatique existe précisément pour éviter cet export.
+
+Pour n'utiliser qu'un jeton explicite — par exemple un *fine-grained PAT* en
+lecture seule — fournissez-le le temps d'une commande, et désactivez le repli :
+
+```bash
+GITHUB_TOKEN="github_pat_..." githor auth check     # ponctuel, non exporté
+```
+
+```toml
+[github]
+use_gh_cli = false
+```
+
+Le jeton n'est jamais affiché, journalisé, ni persisté : seule sa **provenance**
+apparaît (`configuré (gh CLI)`, `configuré (GITHUB_TOKEN)`, `absent`).
 
 ### Fichier de configuration
 
@@ -106,6 +131,7 @@ cp config/config.toml.example config/config.toml
 ```toml
 [github]
 api_url = "https://api.github.com"   # racine de l'API (GitHub Enterprise possible)
+use_gh_cli = true                    # repli sur « gh auth token » si GITHUB_TOKEN est absent
 
 [scan]
 include_forks = false
@@ -151,15 +177,26 @@ githor config show
 ```bash
 githor --help                     # aide générale
 githor --version                  # version de Githor
-githor config show                # configuration effective et état du token
+githor auth check                 # vérifie le jeton, l'API et le quota
+githor config show                # configuration effective et provenance du jeton
 githor --config f.toml <cmd>      # utilise un fichier de configuration précis
 githor --debug <commande>         # logs détaillés et traceback complète en cas d'erreur
+```
+
+```console
+$ githor auth check
+Authentification GitHub
+
+Jeton        configuré (gh CLI)
+Utilisateur  nouhailler
+API          joignable (https://api.github.com)
+Quota        5000 / 5000
+Statut       OK
 ```
 
 ### Cible de la V0.1
 
 ```bash
-githor auth check                 # vérifie le token, l'API et le rate limit
 githor repos                      # liste les repositories accessibles
 githor scan                       # scanne tout et alimente SQLite
 githor scan Architecturor         # scanne un seul repository
@@ -182,7 +219,7 @@ githor export --format markdown
 │   ├── config.py     # lecture et validation du TOML, résolution des chemins
 │   ├── errors.py     # exceptions applicatives (messages destinés à l'utilisateur)
 │   ├── logging.py    # configuration du logging (Rich, stderr)
-│   ├── github/       # client HTTP : pagination, quota, tentatives, erreurs
+│   ├── github/       # client HTTP, résolution du jeton, erreurs
 │   ├── models/       # modèles normalisés (repository, snapshot, activity)
 │   ├── collectors/   # repositories, languages, structure, activity
 │   ├── storage/      # SQLAlchemy : schéma et accès SQLite

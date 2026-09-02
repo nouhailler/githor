@@ -11,7 +11,6 @@ from githor.config import (
     find_config_file,
     get_github_token,
     load_config,
-    require_github_token,
 )
 from githor.errors import ConfigError, GithorError
 
@@ -189,11 +188,6 @@ def test_token_is_read_and_stripped(monkeypatch: pytest.MonkeyPatch) -> None:
     assert get_github_token() == "ghp_exemple"
 
 
-def test_require_token_explains_how_to_set_it() -> None:
-    with pytest.raises(ConfigError, match=GITHUB_TOKEN_ENV):
-        require_github_token()
-
-
 def test_config_never_carries_the_token(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv(GITHUB_TOKEN_ENV, "ghp_ne_doit_pas_fuiter")
 
@@ -211,3 +205,13 @@ def test_example_file_matches_the_model() -> None:
 
     assert isinstance(config, Config)
     assert config.scan.commit_history_days == 90
+
+
+def test_gh_cli_fallback_is_enabled_by_default(tmp_path: Path) -> None:
+    assert load_config(base_dir=tmp_path).github.use_gh_cli is True
+
+
+def test_gh_cli_fallback_can_be_disabled(tmp_path: Path) -> None:
+    path = write(tmp_path / "gh.toml", "[github]\nuse_gh_cli = false\n")
+
+    assert load_config(path, base_dir=tmp_path).github.use_gh_cli is False
