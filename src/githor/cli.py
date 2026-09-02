@@ -24,6 +24,7 @@ from githor.github.client import GitHubClient, RateLimit
 from githor.github.token import find_token, require_token
 from githor.logging import get_logger, setup_logging
 from githor.models.repository import Repository
+from githor.storage.database import Database
 
 console = Console()
 stderr_console = Console(stderr=True)
@@ -67,6 +68,13 @@ auth_app = typer.Typer(
 )
 app.add_typer(auth_app, name="auth")
 
+db_app = typer.Typer(
+    help="Base de données locale.",
+    no_args_is_help=True,
+    pretty_exceptions_enable=False,
+)
+app.add_typer(db_app, name="db")
+
 
 def _version_callback(value: bool) -> None:
     """Affiche la version puis interrompt l'exécution (option eager)."""
@@ -109,6 +117,26 @@ def cli(
 def current_config() -> Config:
     """Charge la configuration en tenant compte de l'option globale ``--config``."""
     return load_config(state.config_path)
+
+
+def open_database(config: Config) -> Database:
+    """Ouvre la base déclarée par la configuration."""
+    return Database(config.storage.database, echo=state.debug)
+
+
+@db_app.command("init")
+def db_init() -> None:
+    """Crée la base SQLite et son schéma. L'opération est idempotente."""
+    config = current_config()
+    existed = config.storage.database.exists()
+
+    with open_database(config) as database:
+        database.create_schema()
+        tables = database.table_names()
+
+    verb = "vérifiée" if existed else "créée"
+    console.print(f"Base {verb} : [bold]{config.storage.database}[/bold]", highlight=False)
+    console.print(f"{len(tables)} table(s) : {', '.join(tables)}", highlight=False)
 
 
 @config_app.command("show")

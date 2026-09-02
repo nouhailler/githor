@@ -5,9 +5,9 @@ GitHub, d'en collecter les métadonnées, d'en suivre l'évolution dans le temps
 (*snapshots*), d'en extraire des métriques et de détecter ce qui manque à chaque
 projet (*findings*).
 
-> **État : V0.1 en cours de développement — étapes 1 à 6 sur 13 terminées.**
-> `githor auth check` et `githor repos` fonctionnent. La persistance SQLite,
-> les snapshots, les findings et les exports arrivent aux étapes suivantes.
+> **État : V0.1 en cours de développement — étapes 1 à 7 sur 13 terminées.**
+> `githor auth check`, `githor repos` et `githor db init` fonctionnent. Le
+> remplissage de la base, les findings et les exports arrivent aux étapes suivantes.
 
 ---
 
@@ -181,6 +181,7 @@ githor auth check                 # vérifie le jeton, l'API et le quota
 githor repos                      # liste les repositories accessibles
 githor repos --include-forks      # y compris les forks
 githor repos --include-archived   # y compris les dépôts archivés
+githor db init                    # crée la base SQLite et son schéma
 githor config show                # configuration effective et provenance du jeton
 githor --config f.toml <cmd>      # utilise un fichier de configuration précis
 githor --debug <commande>         # logs détaillés et traceback complète en cas d'erreur
@@ -253,7 +254,7 @@ produit un fichier exploitable.
 │   ├── github/       # client HTTP, résolution du jeton, erreurs
 │   ├── models/       # modèles normalisés (repository ; snapshot, activity à venir)
 │   ├── collectors/   # repositories (langages, structure, activité à venir)
-│   ├── storage/      # SQLAlchemy : schéma et accès SQLite
+│   ├── storage/      # SQLAlchemy : schéma (tables.py) et session (database.py)
 │   ├── exporters/    # JSON, CSV, Markdown
 │   └── utils/        # dates et helpers
 │
@@ -278,6 +279,39 @@ La couche `github/` isole tout ce qui touche au réseau :
 - **erreurs nommées** : `AuthenticationError`, `PermissionError`, `NotFoundError`,
   `RateLimitError`, `APIUnavailableError`, `TimeoutError`, `InvalidResponseError`,
   `UnexpectedStatusError`, toutes dérivées de `GithorError`.
+
+## Base de données
+
+La base vit dans `data/githor.db` (chemin configurable) et n'est jamais versionnée.
+
+```bash
+githor db init     # idempotent : crée ce qui manque, ne détruit rien
+```
+
+Huit tables :
+
+| Table | Rattachée à | Contenu |
+|---|---|---|
+| `repositories` | — | le projet : identité, adresses, dates, statut |
+| `repository_snapshots` | repository | son état mesuré à une date donnée |
+| `languages` | snapshot | octets et pourcentage par langage |
+| `repository_files` | snapshot | arborescence relevée |
+| `commits` | repository | commits de la fenêtre d'historique |
+| `releases` | repository | tag, nom, date, brouillon, préversion |
+| `issues` | repository | numéro, titre, état, dates |
+| `findings` | repository + snapshot | constats produits par les règles |
+
+Deux choix structurent ce schéma :
+
+- **langages et fichiers pendent du snapshot**, pas du repository : leur évolution
+  reste ainsi lisible dans le temps ;
+- **commits, releases et issues pendent du repository** : ce sont des faits datés,
+  qui ne se réécrivent pas d'un scan à l'autre.
+
+Les clés étrangères sont réellement appliquées — SQLite les ignore par défaut, et
+Githor émet `PRAGMA foreign_keys = ON` sur chaque connexion. Supprimer un
+repository supprime donc tout son historique. Les dates sont stockées en UTC et
+relues en UTC, quel que soit le fuseau de la machine.
 
 ## Snapshots
 

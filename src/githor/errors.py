@@ -12,3 +12,7 @@ class GithorError(Exception):
 
 class ConfigError(GithorError):
     """Configuration absente, illisible ou invalide."""
+
+
+class StorageError(GithorError):
+    """Base SQLite inaccessible, verrouillée ou corrompue."""

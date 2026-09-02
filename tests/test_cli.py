@@ -386,3 +386,42 @@ def test_repos_keeps_progress_off_stdout(httpx_mock: HTTPXMock, authenticated: N
     result = runner.invoke(cli.app, ["repos"])
 
     assert "Récupération des repositories" not in plain(result.stdout)
+
+
+# ── db init ──────────────────────────────────────────────────────────────────
+
+
+def test_db_init_creates_the_database(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(cli.app, ["db", "init"])
+    output = plain(result.output)
+
+    assert result.exit_code == 0
+    assert (tmp_path / "data" / "githor.db").exists()
+    assert "Base créée" in output
+    assert "8 table(s)" in output
+    assert "repository_snapshots" in output
+
+
+def test_db_init_is_idempotent(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    runner.invoke(cli.app, ["db", "init"])
+
+    result = runner.invoke(cli.app, ["db", "init"])
+
+    assert result.exit_code == 0
+    assert "Base vérifiée" in plain(result.output)
+
+
+def test_db_init_honours_the_configured_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    config = tmp_path / "perso.toml"
+    config.write_text('[storage]\ndatabase = "ailleurs/base.db"\n', encoding="utf-8")
+
+    result = runner.invoke(cli.app, ["--config", str(config), "db", "init"])
+
+    assert result.exit_code == 0
+    assert (tmp_path / "ailleurs" / "base.db").exists()
