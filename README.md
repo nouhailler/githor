@@ -5,8 +5,8 @@ GitHub, d'en collecter les métadonnées, d'en suivre l'évolution dans le temps
 (*snapshots*), d'en extraire des métriques et de détecter ce qui manque à chaque
 projet (*findings*).
 
-> **État : V0.1 en cours de développement — étapes 1 à 3 sur 13 terminées.**
-> Le socle du projet, la CLI et la configuration sont en place.
+> **État : V0.1 en cours de développement — étapes 1 à 4 sur 13 terminées.**
+> Le socle, la CLI, la configuration et le client GitHub sont en place.
 > Les sous-commandes GitHub décrites dans « Utilisation » arrivent aux étapes suivantes.
 
 ---
@@ -182,7 +182,7 @@ githor export --format markdown
 │   ├── config.py     # lecture et validation du TOML, résolution des chemins
 │   ├── errors.py     # exceptions applicatives (messages destinés à l'utilisateur)
 │   ├── logging.py    # configuration du logging (Rich, stderr)
-│   ├── github/       # client HTTP GitHub, pagination, rate limit, erreurs
+│   ├── github/       # client HTTP : pagination, quota, tentatives, erreurs
 │   ├── models/       # modèles normalisés (repository, snapshot, activity)
 │   ├── collectors/   # repositories, languages, structure, activity
 │   ├── storage/      # SQLAlchemy : schéma et accès SQLite
@@ -193,6 +193,23 @@ githor export --format markdown
 ├── config/           # config.toml.example
 └── data/             # base SQLite, exports, cache (non versionnés)
 ```
+
+## Accès à l'API GitHub
+
+La couche `github/` isole tout ce qui touche au réseau :
+
+- **authentification** par en-tête `Authorization: Bearer`, version d'API épinglée
+  (`X-GitHub-Api-Version`), `User-Agent` identifiant Githor ;
+- **pagination** guidée par l'en-tête `Link` renvoyé par GitHub, jamais par un compteur
+  calculé localement, avec une borne de sécurité qui avertit plutôt que de boucler ;
+- **tentatives bornées** : délais, coupures réseau et erreurs 5xx sont réessayés avec une
+  attente exponentielle, `Retry-After` étant respecté quand GitHub l'impose ;
+- **quota** relevé à chaque réponse. Un quota bas déclenche un avertissement ; un quota
+  **épuisé arrête immédiatement** le programme en indiquant l'heure de réinitialisation —
+  Githor n'attend jamais une heure en silence ;
+- **erreurs nommées** : `AuthenticationError`, `PermissionError`, `NotFoundError`,
+  `RateLimitError`, `APIUnavailableError`, `TimeoutError`, `InvalidResponseError`,
+  `UnexpectedStatusError`, toutes dérivées de `GithorError`.
 
 ## Snapshots
 
