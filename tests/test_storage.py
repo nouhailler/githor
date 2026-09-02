@@ -6,8 +6,16 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 
+from githor.collectors.repositories import build_snapshot
 from githor.errors import GithorError, StorageError
+from githor.models.repository import Repository
 from githor.storage.database import Database
+from githor.storage.repositories import (
+    add_snapshot,
+    count_snapshots,
+    latest_snapshot,
+    upsert_repository,
+)
 from githor.storage.tables import (
     CommitRow,
     FindingRow,
@@ -55,7 +63,7 @@ def add_repository(database: Database, **overrides: object) -> int:
         return row.id
 
 
-def add_snapshot(database: Database, repository_id: int, *, collected_at: datetime) -> int:
+def insert_snapshot(database: Database, repository_id: int, *, collected_at: datetime) -> int:
     """Insère un snapshot et retourne son identifiant interne."""
     row = RepositorySnapshotRow(repository_id=repository_id, collected_at=collected_at)
     with database.session() as session:
@@ -114,7 +122,7 @@ def test_foreign_keys_are_enforced(database: Database) -> None:
 
 def test_deleting_a_repository_cascades(database: Database) -> None:
     repository_id = add_repository(database)
-    snapshot_id = add_snapshot(database, repository_id, collected_at=datetime.now(UTC))
+    snapshot_id = insert_snapshot(database, repository_id, collected_at=datetime.now(UTC))
 
     with database.session() as session:
         session.add_all(
@@ -171,7 +179,9 @@ def test_full_name_is_unique(database: Database) -> None:
 
 
 def test_a_language_appears_once_per_snapshot(database: Database) -> None:
-    snapshot_id = add_snapshot(database, add_repository(database), collected_at=datetime.now(UTC))
+    snapshot_id = insert_snapshot(
+        database, add_repository(database), collected_at=datetime.now(UTC)
+    )
 
     with database.session() as session:
         session.add(LanguageRow(snapshot_id=snapshot_id, language="Python", bytes=1))
@@ -202,7 +212,7 @@ def test_an_issue_number_appears_once_per_repository(database: Database) -> None
 
 def test_a_rule_produces_one_finding_per_snapshot(database: Database) -> None:
     repository_id = add_repository(database)
-    snapshot_id = add_snapshot(database, repository_id, collected_at=datetime.now(UTC))
+    snapshot_id = insert_snapshot(database, repository_id, collected_at=datetime.now(UTC))
     finding = {
         "repository_id": repository_id,
         "snapshot_id": snapshot_id,
@@ -257,7 +267,7 @@ def test_snapshots_accumulate_instead_of_overwriting(database: Database) -> None
     ]
 
     for collected_at in dates:
-        add_snapshot(database, repository_id, collected_at=collected_at)
+        insert_snapshot(database, repository_id, collected_at=collected_at)
 
     with database.session() as session:
         stored = session.scalars(
@@ -269,7 +279,7 @@ def test_snapshots_accumulate_instead_of_overwriting(database: Database) -> None
 
 def test_relationships_link_a_repository_to_its_history(database: Database) -> None:
     repository_id = add_repository(database)
-    snapshot_id = add_snapshot(database, repository_id, collected_at=datetime.now(UTC))
+    snapshot_id = insert_snapshot(database, repository_id, collected_at=datetime.now(UTC))
 
     with database.session() as session:
         session.add(LanguageRow(snapshot_id=snapshot_id, language="Python", bytes=42))
@@ -300,3 +310,97 @@ def test_a_failed_block_rolls_back(database: Database) -> None:
 
     with database.session() as session:
         assert session.scalars(select(RepositoryRow)).all() == []
+
+
+# ── Repositories et snapshots ────────────────────────────────────────────────
+
+
+def normalised(**overrides: object) -> Repository:
+    """Construit un repository normalisé pour les tests d'écriture."""
+    defaults = {
+        "github_id": 1,
+        "name": "Architecturor",
+        "full_name": "nouhailler/Architecturor",
+        "owner": "nouhailler",
+        "html_url": "https://github.com/nouhailler/Architecturor",
+        "stars": 3,
+        "forks": 1,
+        "watchers": 3,
+        "open_issues_count": 4,
+        "size_kb": 2048,
+        "language": "TypeScript",
+    }
+    return Repository(**{**defaults, **overrides})  # type: ignore[arg-type]
+
+
+def test_upsert_creates_then_updates(database: Database) -> None:
+    with database.session() as session:
+        row, created = upsert_repository(session, normalised())
+        assert created is True
+        assert row.full_name == "nouhailler/Architecturor"
+
+    with database.session() as session:
+        row, created = upsert_repository(session, normalised(description="mise à jour"))
+        assert created is False
+        assert row.description == "mise à jour"
+
+    with database.session() as session:
+        assert len(session.scalars(select(RepositoryRow)).all()) == 1
+
+
+def test_upsert_follows_a_rename(database: Database) -> None:
+    """Le dépôt est identifié par son github_id : un renommage ne le duplique pas."""
+    with database.session() as session:
+        upsert_repository(session, normalised())
+
+    with database.session() as session:
+        row, created = upsert_repository(
+            session, normalised(name="Nouveau", full_name="nouhailler/Nouveau")
+        )
+
+    assert created is False
+    assert row.full_name == "nouhailler/Nouveau"
+
+    with database.session() as session:
+        assert len(session.scalars(select(RepositoryRow)).all()) == 1
+
+
+def test_snapshot_carries_the_measured_values(database: Database) -> None:
+    repository = normalised()
+    moment = datetime(2026, 9, 2, 12, 0, tzinfo=UTC)
+
+    with database.session() as session:
+        row, _ = upsert_repository(session, repository)
+        snapshot = add_snapshot(session, row.id, build_snapshot(repository, collected_at=moment))
+
+    assert snapshot.collected_at == moment
+    assert snapshot.stars == 3
+    assert snapshot.open_issues == 4
+    assert snapshot.size_kb == 2048
+    assert snapshot.primary_language == "TypeScript"
+    assert snapshot.open_prs is None
+
+
+def test_repeated_scans_accumulate_snapshots(database: Database) -> None:
+    repository = normalised()
+    dates = [datetime(2026, 8, day, tzinfo=UTC) for day in (1, 15, 30)]
+
+    for collected_at in dates:
+        with database.session() as session:
+            row, _ = upsert_repository(session, repository)
+            add_snapshot(session, row.id, build_snapshot(repository, collected_at=collected_at))
+
+    with database.session() as session:
+        row = session.scalar(select(RepositoryRow))
+        assert row is not None
+        assert count_snapshots(session, row.id) == 3
+        newest = latest_snapshot(session, row.id)
+        assert newest is not None
+        assert newest.collected_at == dates[-1]
+
+
+def test_latest_snapshot_is_none_without_history(database: Database) -> None:
+    with database.session() as session:
+        row, _ = upsert_repository(session, normalised())
+        assert latest_snapshot(session, row.id) is None
+        assert count_snapshots(session, row.id) == 0

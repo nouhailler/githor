@@ -14,17 +14,27 @@ from typing import Annotated
 
 import typer
 from rich.console import Console
+from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
 from rich.table import Table
 
 from githor import __version__
-from githor.collectors.repositories import RepositoryCollection, collect_repositories
-from githor.config import Config, load_config
+from githor.collectors.repositories import (
+    RepositoryCollection,
+    build_snapshot,
+    collect_repositories,
+    normalise_repository,
+)
+from githor.config import Config, ScanConfig, load_config
 from githor.errors import GithorError
 from githor.github.client import GitHubClient, RateLimit
+from githor.github.errors import NotFoundError
+from githor.github.repositories import get_repository
 from githor.github.token import find_token, require_token
+from githor.github.user import get_authenticated_login, get_authenticated_user
 from githor.logging import get_logger, setup_logging
 from githor.models.repository import Repository
 from githor.storage.database import Database
+from githor.storage.repositories import add_snapshot, count_snapshots, upsert_repository
 
 console = Console()
 stderr_console = Console(stderr=True)
@@ -177,10 +187,8 @@ def auth_check() -> None:
     token = require_token(allow_gh_cli=config.github.use_gh_cli)
 
     with GitHubClient(token.value, api_url=config.github.api_url) as client:
-        user = client.get("/user")
+        login = get_authenticated_user(client).get("login", "?")
         quota = client.get_rate_limit()
-
-    login = user.get("login", "?") if isinstance(user, dict) else "?"
 
     report = Table.grid(padding=(0, 2))
     report.add_column(style="bold")
@@ -193,6 +201,131 @@ def auth_check() -> None:
 
     console.print("[bold]Authentification GitHub[/bold]\n")
     console.print(report)
+
+
+@app.command("scan")
+def scan(
+    repository: Annotated[
+        str | None,
+        typer.Argument(
+            metavar="[REPOSITORY]",
+            help="Nom d'un dépôt à scanner seul, par exemple Architecturor "
+            "ou nouhailler/Architecturor. Tous par défaut.",
+        ),
+    ] = None,
+    include_forks: Annotated[
+        bool,
+        typer.Option("--include-forks", help="Inclut les forks, exclus par défaut."),
+    ] = False,
+    include_archived: Annotated[
+        bool,
+        typer.Option("--include-archived", help="Inclut les dépôts archivés, exclus par défaut."),
+    ] = False,
+) -> None:
+    """Scanne les repositories et enregistre un snapshot de chacun.
+
+    Chaque exécution **ajoute** un snapshot : les mesures précédentes sont
+    conservées, afin de pouvoir suivre l'évolution des projets.
+    """
+    config = current_config()
+    scope = _scope(config, include_forks=include_forks, include_archived=include_archived)
+    token = require_token(allow_gh_cli=config.github.use_gh_cli)
+
+    console.print("[bold]Githor — scan[/bold]\n")
+
+    with GitHubClient(token.value, api_url=config.github.api_url) as client:
+        if repository is None:
+            with stderr_console.status("Récupération des repositories…"):
+                collection = collect_repositories(client, scope)
+        else:
+            collection = RepositoryCollection([_fetch_one(client, repository)])
+        quota = client.rate_limit
+
+    if not collection.repositories:
+        console.print("Aucun repository ne correspond au périmètre configuré.")
+        _print_exclusions(collection)
+        return
+
+    console.print(f"Repositories à scanner : [bold]{len(collection.repositories)}[/bold]\n")
+
+    with open_database(config) as database:
+        database.create_schema()
+        created, updated, snapshots = _persist(database, collection.repositories)
+
+    console.print(
+        f"\n[bold]{len(collection.repositories)}[/bold] repository(s) scanné(s) : "
+        f"{created} nouveau(x), {updated} mis à jour.",
+        highlight=False,
+    )
+    console.print(f"{snapshots} snapshot(s) enregistré(s).", highlight=False)
+    console.print(f"Base : {config.storage.database}", highlight=False)
+    _print_exclusions(collection)
+
+    if quota is not None and quota.is_low:
+        console.print(f"[yellow]Quota GitHub bas : {quota.remaining} / {quota.limit}.[/yellow]")
+
+
+def _scope(config: Config, *, include_forks: bool, include_archived: bool) -> ScanConfig:
+    """Combine le périmètre configuré et les élargissements demandés en option."""
+    return config.scan.model_copy(
+        update={
+            "include_forks": config.scan.include_forks or include_forks,
+            "include_archived": config.scan.include_archived or include_archived,
+        }
+    )
+
+
+def _fetch_one(client: GitHubClient, name: str) -> Repository:
+    """Résout un nom de dépôt et récupère ses métadonnées.
+
+    Un nom sans propriétaire est rattaché à l'utilisateur authentifié.
+    """
+    full_name = name if "/" in name else f"{get_authenticated_login(client)}/{name}"
+    try:
+        return normalise_repository(get_repository(client, full_name))
+    except NotFoundError as exc:
+        raise NotFoundError(f"Repository introuvable : {name}") from exc
+
+
+def _persist(database: Database, repositories: Sequence[Repository]) -> tuple[int, int, int]:
+    """Enregistre les repositories et leurs snapshots.
+
+    Returns:
+        Le nombre de repositories créés, mis à jour, et de snapshots ajoutés.
+    """
+    created = 0
+    updated = 0
+    snapshots = 0
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        console=stderr_console,
+        transient=True,
+    ) as progress:
+        task = progress.add_task("Scan", total=len(repositories))
+
+        for repository in repositories:
+            progress.update(task, description=repository.full_name)
+
+            with database.session() as session:
+                row, is_new = upsert_repository(session, repository)
+                add_snapshot(session, row.id, build_snapshot(repository))
+                total = count_snapshots(session, row.id)
+
+            created += int(is_new)
+            updated += int(not is_new)
+            snapshots += 1
+
+            marker = "[green]+[/green]" if is_new else "[green]✓[/green]"
+            console.print(
+                f"{marker} {repository.full_name} [dim](snapshot {total})[/dim]", highlight=False
+            )
+            progress.advance(task)
+
+    return created, updated, snapshots
 
 
 @app.command("repos")
@@ -208,17 +341,12 @@ def repos(
 ) -> None:
     """Liste les repositories accessibles, après application du périmètre configuré."""
     config = current_config()
-    scan = config.scan.model_copy(
-        update={
-            "include_forks": config.scan.include_forks or include_forks,
-            "include_archived": config.scan.include_archived or include_archived,
-        }
-    )
+    scope = _scope(config, include_forks=include_forks, include_archived=include_archived)
     token = require_token(allow_gh_cli=config.github.use_gh_cli)
 
     with GitHubClient(token.value, api_url=config.github.api_url) as client:
         with stderr_console.status("Récupération des repositories…"):
-            collection = collect_repositories(client, scan)
+            collection = collect_repositories(client, scope)
         quota = client.rate_limit
 
     if not collection.repositories:

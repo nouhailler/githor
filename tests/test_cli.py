@@ -2,6 +2,7 @@
 
 import logging
 import re
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -13,7 +14,7 @@ from githor import __version__, cli
 from githor.config import GITHUB_TOKEN_ENV
 from githor.errors import ConfigError
 from githor.github.client import DEFAULT_API_URL
-from githor.github.errors import AuthenticationError
+from githor.github.errors import AuthenticationError, NotFoundError
 from githor.github.token import ResolvedToken, TokenSource
 
 runner = CliRunner()
@@ -425,3 +426,115 @@ def test_db_init_honours_the_configured_path(
 
     assert result.exit_code == 0
     assert (tmp_path / "ailleurs" / "base.db").exists()
+
+
+# ── scan ─────────────────────────────────────────────────────────────────────
+
+
+def snapshot_count(root: Path) -> int:
+    """Compte les snapshots enregistrés dans la base du répertoire donné."""
+    with sqlite3.connect(root / "data" / "githor.db") as connection:
+        return int(connection.execute("SELECT COUNT(*) FROM repository_snapshots").fetchone()[0])
+
+
+def test_scan_persists_repositories_and_snapshots(
+    httpx_mock: HTTPXMock, authenticated: None, tmp_path: Path
+) -> None:
+    httpx_mock.add_response(json=[repo_payload(), repo_payload(id=2, full_name="nouhailler/b")])
+
+    result = runner.invoke(cli.app, ["scan"])
+    output = plain(result.output)
+
+    assert result.exit_code == 0
+    assert "2 repository(s) scanné(s) : 2 nouveau(x), 0 mis à jour" in output
+    assert "2 snapshot(s) enregistré(s)" in output
+    assert snapshot_count(tmp_path) == 2
+
+
+def test_a_second_scan_adds_snapshots_without_duplicating_repositories(
+    httpx_mock: HTTPXMock, authenticated: None, tmp_path: Path
+) -> None:
+    """La propriété centrale : un scan ajoute une mesure, il n'écrase pas la précédente."""
+    httpx_mock.add_response(json=[repo_payload()], is_reusable=True)
+
+    runner.invoke(cli.app, ["scan"])
+    result = runner.invoke(cli.app, ["scan"])
+    output = plain(result.output)
+
+    assert "1 repository(s) scanné(s) : 0 nouveau(x), 1 mis à jour" in output
+    assert "snapshot 2" in output
+    assert snapshot_count(tmp_path) == 2
+
+    with sqlite3.connect(tmp_path / "data" / "githor.db") as connection:
+        assert connection.execute("SELECT COUNT(*) FROM repositories").fetchone()[0] == 1
+
+
+def test_scan_creates_the_schema_on_the_fly(
+    httpx_mock: HTTPXMock, authenticated: None, tmp_path: Path
+) -> None:
+    httpx_mock.add_response(json=[repo_payload()])
+
+    result = runner.invoke(cli.app, ["scan"])
+
+    assert result.exit_code == 0
+    assert (tmp_path / "data" / "githor.db").exists()
+
+
+def test_scan_applies_the_configured_scope(
+    httpx_mock: HTTPXMock, authenticated: None, tmp_path: Path
+) -> None:
+    httpx_mock.add_response(
+        json=[repo_payload(), repo_payload(id=2, full_name="nouhailler/f", fork=True)]
+    )
+
+    result = runner.invoke(cli.app, ["scan"])
+
+    assert "1 fork(s)" in plain(result.output)
+    assert snapshot_count(tmp_path) == 1
+
+
+def test_scan_of_a_single_repository_resolves_a_short_name(
+    httpx_mock: HTTPXMock, authenticated: None, tmp_path: Path
+) -> None:
+    httpx_mock.add_response(url=f"{DEFAULT_API_URL}/user", json={"login": "nouhailler"})
+    httpx_mock.add_response(
+        url=f"{DEFAULT_API_URL}/repos/nouhailler/Architecturor", json=repo_payload()
+    )
+
+    result = runner.invoke(cli.app, ["scan", "Architecturor"])
+
+    assert result.exit_code == 0
+    assert "1 repository(s) scanné(s)" in plain(result.output)
+    assert snapshot_count(tmp_path) == 1
+
+
+def test_scan_of_a_single_repository_accepts_a_full_name(
+    httpx_mock: HTTPXMock, authenticated: None, tmp_path: Path
+) -> None:
+    httpx_mock.add_response(
+        url=f"{DEFAULT_API_URL}/repos/nouhailler/Architecturor", json=repo_payload()
+    )
+
+    result = runner.invoke(cli.app, ["scan", "nouhailler/Architecturor"])
+
+    assert result.exit_code == 0
+    assert snapshot_count(tmp_path) == 1
+
+
+def test_scan_of_an_unknown_repository_fails(httpx_mock: HTTPXMock, authenticated: None) -> None:
+    httpx_mock.add_response(url=f"{DEFAULT_API_URL}/user", json={"login": "nouhailler"})
+    httpx_mock.add_response(status_code=404, json={"message": "Not Found"})
+
+    result = runner.invoke(cli.app, ["scan", "NExistePas"])
+
+    assert result.exit_code != 0
+    assert isinstance(result.exception, NotFoundError)
+    assert "Repository introuvable : NExistePas" in str(result.exception)
+
+
+def test_scan_keeps_progress_off_stdout(httpx_mock: HTTPXMock, authenticated: None) -> None:
+    httpx_mock.add_response(json=[repo_payload()])
+
+    result = runner.invoke(cli.app, ["scan"])
+
+    assert "Récupération des repositories" not in plain(result.stdout)

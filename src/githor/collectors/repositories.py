@@ -11,6 +11,7 @@ changerait de forme doit produire une erreur visible, jamais un silence.
 """
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from pydantic import ValidationError
@@ -21,7 +22,8 @@ from githor.github.errors import InvalidResponseError
 from githor.github.repositories import list_repositories
 from githor.logging import get_logger
 from githor.models.repository import Repository
-from githor.utils.dates import parse_datetime
+from githor.models.snapshot import RepositorySnapshot
+from githor.utils.dates import parse_datetime, utc_now
 
 logger = get_logger("collectors.repositories")
 
@@ -160,3 +162,29 @@ def collect_repositories(client: GitHubClient, scan: ScanConfig) -> RepositoryCo
         excluded_archived,
     )
     return RepositoryCollection(retained, excluded_forks, excluded_archived)
+
+
+def build_snapshot(
+    repository: Repository, *, collected_at: datetime | None = None
+) -> RepositorySnapshot:
+    """Dérive un snapshot des métadonnées d'un repository.
+
+    Les compteurs proviennent de la réponse ``/user/repos`` : aucun appel
+    supplémentaire n'est nécessaire à ce stade. ``open_prs`` reste nul tant que
+    les pull requests ne sont pas comptées séparément — ``open_issues`` de
+    GitHub les inclut.
+
+    Args:
+        repository: modèle normalisé.
+        collected_at: instant de la mesure ; maintenant par défaut.
+    """
+    return RepositorySnapshot(
+        collected_at=collected_at or utc_now(),
+        stars=repository.stars,
+        forks=repository.forks,
+        watchers=repository.watchers,
+        open_issues=repository.open_issues_count,
+        size_kb=repository.size_kb,
+        primary_language=repository.language,
+        default_branch=repository.default_branch,
+    )

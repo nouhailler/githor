@@ -5,9 +5,9 @@ GitHub, d'en collecter les métadonnées, d'en suivre l'évolution dans le temps
 (*snapshots*), d'en extraire des métriques et de détecter ce qui manque à chaque
 projet (*findings*).
 
-> **État : V0.1 en cours de développement — étapes 1 à 7 sur 13 terminées.**
-> `githor auth check`, `githor repos` et `githor db init` fonctionnent. Le
-> remplissage de la base, les findings et les exports arrivent aux étapes suivantes.
+> **État : V0.1 en cours de développement — étapes 1 à 8 sur 13 terminées.**
+> `githor scan` alimente la base et crée un snapshot par dépôt. Langages,
+> structure, activité, findings et exports arrivent aux étapes suivantes.
 
 ---
 
@@ -181,6 +181,8 @@ githor auth check                 # vérifie le jeton, l'API et le quota
 githor repos                      # liste les repositories accessibles
 githor repos --include-forks      # y compris les forks
 githor repos --include-archived   # y compris les dépôts archivés
+githor scan                       # scanne tous les dépôts et enregistre un snapshot
+githor scan Architecturor         # scanne un seul dépôt
 githor db init                    # crée la base SQLite et son schéma
 githor config show                # configuration effective et provenance du jeton
 githor --config f.toml <cmd>      # utilise un fichier de configuration précis
@@ -201,8 +203,6 @@ Statut       OK
 ### Cible de la V0.1
 
 ```bash
-githor scan                       # scanne tout et alimente SQLite
-githor scan Architecturor         # scanne un seul repository
 githor report Architecturor       # rapport Markdown d'un repository
 githor export --format json       # exports dans data/exports/
 githor export --format csv
@@ -317,8 +317,34 @@ relues en UTC, quel que soit le fuseau de la machine.
 
 Un `Repository` représente le projet ; un `RepositorySnapshot` représente son état
 à une date donnée. Un nouveau scan **ajoute** un snapshot, il ne remplace pas les
-précédents — c'est ce qui permettra plus tard d'étudier l'évolution des projets et
-de comparer les repositories entre eux.
+précédents — c'est ce qui permettra d'étudier l'évolution des projets et de les
+comparer entre eux.
+
+```console
+$ githor scan
+Githor — scan
+
+Repositories à scanner : 77
+
++ nouhailler/Architecturor (snapshot 1)
++ nouhailler/Astror (snapshot 1)
+…
+
+77 repository(s) scanné(s) : 77 nouveau(x), 0 mis à jour.
+77 snapshot(s) enregistré(s).
+```
+
+`+` signale un dépôt découvert, `✓` un dépôt déjà connu ; le compteur entre
+parenthèses indique combien de mesures Githor conserve pour ce projet.
+
+Le dépôt est identifié par son **identifiant GitHub**, jamais par son nom : un
+projet renommé reste le même projet, et son historique le suit.
+
+```bash
+githor scan                  # tous les dépôts du périmètre
+githor scan Architecturor    # un seul, nom court rattaché à votre compte
+githor scan autrui/projet    # un seul, nom complet
+```
 
 ## Logs et diagnostic
 
