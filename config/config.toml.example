@@ -1,15 +1,29 @@
 # Githor — configuration
 #
 # Copier ce fichier vers config/config.toml puis adapter si nécessaire.
+# Toutes les clés sont facultatives : les valeurs ci-dessous sont celles
+# appliquées par défaut si le fichier est absent.
+#
 # Ce fichier ne doit JAMAIS contenir de secret : le token GitHub est lu
 # exclusivement depuis la variable d'environnement GITHUB_TOKEN.
+#
+# Ordre de recherche, du plus prioritaire au moins prioritaire :
+#   1. githor --config <fichier>
+#   2. $GITHOR_CONFIG
+#   3. config/config.toml, sous le répertoire de travail
+#   4. ~/.config/githor/config.toml
+#
+# Les chemins relatifs sont résolus depuis le répertoire de travail courant.
+# Une clé inconnue provoque une erreur explicite plutôt qu'un silence.
 
 [github]
+# Racine de l'API. À changer pour une instance GitHub Enterprise.
 api_url = "https://api.github.com"
 
 [scan]
 include_forks = false
 include_archived = false
+# Profondeur de l'historique de commits analysé, en jours (1 à 3650).
 commit_history_days = 90
 
 [storage]

@@ -1,9 +1,11 @@
 """Fixtures communes à la suite de tests."""
 
 import logging
+from pathlib import Path
 
 import pytest
 
+from githor import config as config_module
 from githor.logging import LOGGER_NAME
 
 
@@ -17,3 +19,15 @@ def reset_application_logger() -> None:
     logger = logging.getLogger(LOGGER_NAME)
     logger.handlers.clear()
     logger.setLevel(logging.NOTSET)
+
+
+@pytest.fixture(autouse=True)
+def isolate_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Isole les tests de la machine qui les exécute.
+
+    Ni la configuration personnelle de l'utilisateur ni son token GitHub ne
+    doivent influencer les résultats.
+    """
+    monkeypatch.delenv(config_module.GITHUB_TOKEN_ENV, raising=False)
+    monkeypatch.delenv(config_module.CONFIG_PATH_ENV, raising=False)
+    monkeypatch.setattr(config_module, "USER_CONFIG_PATH", tmp_path / "inexistant" / "config.toml")

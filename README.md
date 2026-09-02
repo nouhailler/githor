@@ -5,9 +5,9 @@ GitHub, d'en collecter les métadonnées, d'en suivre l'évolution dans le temps
 (*snapshots*), d'en extraire des métriques et de détecter ce qui manque à chaque
 projet (*findings*).
 
-> **État : V0.1 en cours de développement — étapes 1 et 2 sur 13 terminées.**
-> Le socle du projet et la CLI (`githor --help`, `githor --version`, `--debug`) sont en
-> place. Les sous-commandes décrites dans « Utilisation » arrivent aux étapes suivantes.
+> **État : V0.1 en cours de développement — étapes 1 à 3 sur 13 terminées.**
+> Le socle du projet, la CLI et la configuration sont en place.
+> Les sous-commandes GitHub décrites dans « Utilisation » arrivent aux étapes suivantes.
 
 ---
 
@@ -96,18 +96,21 @@ Pour le rendre permanent, ajoutez la ligne à `~/.bashrc` (hors du dépôt).
 
 ### Fichier de configuration
 
+Toutes les clés sont facultatives : sans fichier, Githor applique ses valeurs par
+défaut. Pour personnaliser :
+
 ```bash
 cp config/config.toml.example config/config.toml
 ```
 
 ```toml
 [github]
-api_url = "https://api.github.com"
+api_url = "https://api.github.com"   # racine de l'API (GitHub Enterprise possible)
 
 [scan]
 include_forks = false
 include_archived = false
-commit_history_days = 90
+commit_history_days = 90             # profondeur d'historique, 1 à 3650 jours
 
 [storage]
 database = "data/githor.db"
@@ -118,14 +121,39 @@ directory = "data/exports"
 
 `config/config.toml` est ignoré par git : il vous appartient.
 
+**Ordre de recherche**, du plus prioritaire au moins prioritaire :
+
+1. `githor --config <fichier>` ;
+2. la variable d'environnement `GITHOR_CONFIG` ;
+3. `config/config.toml` sous le répertoire de travail ;
+4. `~/.config/githor/config.toml`.
+
+Les **chemins relatifs** sont résolus depuis le répertoire de travail courant —
+une seule règle, sans cas particulier. Une **clé inconnue** (faute de frappe,
+section obsolète) provoque une erreur explicite plutôt qu'un silence :
+
+```console
+$ githor --config perso.toml config show
+Erreur : Configuration invalide dans perso.toml :
+  - scan.include_fork : Extra inputs are not permitted
+```
+
+Pour vérifier la configuration réellement appliquée :
+
+```bash
+githor config show
+```
+
 ## Utilisation
 
 ### Disponible aujourd'hui
 
 ```bash
-githor --help              # aide générale
-githor --version           # version de Githor
-githor --debug <commande>  # logs détaillés et traceback complète en cas d'erreur
+githor --help                     # aide générale
+githor --version                  # version de Githor
+githor config show                # configuration effective et état du token
+githor --config f.toml <cmd>      # utilise un fichier de configuration précis
+githor --debug <commande>         # logs détaillés et traceback complète en cas d'erreur
 ```
 
 ### Cible de la V0.1
@@ -151,6 +179,8 @@ githor export --format markdown
 │
 ├── src/githor/
 │   ├── cli.py        # options globales, logging, traduction des erreurs
+│   ├── config.py     # lecture et validation du TOML, résolution des chemins
+│   ├── errors.py     # exceptions applicatives (messages destinés à l'utilisateur)
 │   ├── logging.py    # configuration du logging (Rich, stderr)
 │   ├── github/       # client HTTP GitHub, pagination, rate limit, erreurs
 │   ├── models/       # modèles normalisés (repository, snapshot, activity)
@@ -176,6 +206,10 @@ de comparer les repositories entre eux.
 Les logs partent sur `stderr`, afin que `stdout` reste réservé aux données produites
 (exports, rapports). Par défaut, seuls les avertissements et les erreurs s'affichent ;
 `--debug` abaisse le niveau à `DEBUG` et rétablit la traceback complète.
+
+Les erreurs attendues (token manquant, configuration invalide, dépôt inaccessible)
+dérivent toutes de `GithorError` et s'affichent comme un message, sans pile d'appels ;
+le code de sortie est `1`, ou `130` après un Ctrl-C.
 
 ## Tests
 

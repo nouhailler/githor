@@ -1,13 +1,16 @@
-"""Tests de la CLI minimale (étape 2) : aide, version, options globales, erreurs."""
+"""Tests de la CLI : aide, version, options globales, erreurs, `config show`."""
 
 import logging
 import re
+from pathlib import Path
 
 import pytest
 import typer
 from typer.testing import CliRunner
 
 from githor import __version__, cli
+from githor.config import GITHUB_TOKEN_ENV
+from githor.errors import ConfigError
 
 runner = CliRunner()
 
@@ -81,7 +84,7 @@ def test_main_reports_unexpected_error_without_traceback(
         raise RuntimeError("boum")
 
     monkeypatch.setattr(cli, "app", boom)
-    monkeypatch.setitem(cli._state, "debug", False)
+    monkeypatch.setattr(cli.state, "debug", False)
 
     assert cli.main() == 1
     assert "boum" in plain(capsys.readouterr().err)
@@ -92,7 +95,7 @@ def test_main_reraises_in_debug_mode(monkeypatch: pytest.MonkeyPatch) -> None:
         raise RuntimeError("boum")
 
     monkeypatch.setattr(cli, "app", boom)
-    monkeypatch.setitem(cli._state, "debug", True)
+    monkeypatch.setattr(cli.state, "debug", True)
 
     with pytest.raises(RuntimeError):
         cli.main()
@@ -104,3 +107,65 @@ def test_main_handles_keyboard_interrupt(monkeypatch: pytest.MonkeyPatch) -> Non
 
     monkeypatch.setattr(cli, "app", interrupted)
     assert cli.main() == 130
+
+
+def test_main_reports_expected_errors_without_hint(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Une GithorError est un message pour l'utilisateur, pas un incident."""
+
+    def refuse() -> None:
+        raise ConfigError("GITHUB_TOKEN n'est pas définie.")
+
+    monkeypatch.setattr(cli, "app", refuse)
+    monkeypatch.setattr(cli.state, "debug", False)
+
+    assert cli.main() == 1
+    err = plain(capsys.readouterr().err)
+    assert "GITHUB_TOKEN" in err
+    assert "inattendue" not in err
+
+
+def test_config_show_displays_defaults(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(cli.app, ["config", "show"])
+    output = plain(result.output)
+
+    assert result.exit_code == 0
+    assert "valeurs par défaut" in output
+    assert "https://api.github.com" in output
+    assert "absent" in output
+
+
+def test_config_show_uses_explicit_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    path = tmp_path / "perso.toml"
+    path.write_text("[scan]\ncommit_history_days = 7\n", encoding="utf-8")
+
+    result = runner.invoke(cli.app, ["--config", str(path), "config", "show"])
+
+    assert result.exit_code == 0
+    assert "7" in plain(result.output)
+
+
+def test_config_show_never_prints_the_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(GITHUB_TOKEN_ENV, "ghp_ne_doit_pas_fuiter")
+
+    result = runner.invoke(cli.app, ["config", "show"])
+    output = plain(result.output)
+
+    assert "ghp_ne_doit_pas_fuiter" not in output
+    assert "configuré" in output
+
+
+def test_config_show_reports_invalid_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(cli.app, ["--config", str(tmp_path / "absent.toml"), "config", "show"])
+
+    assert result.exit_code != 0
+    assert isinstance(result.exception, ConfigError)
