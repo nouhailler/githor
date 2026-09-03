@@ -133,6 +133,20 @@ def latest_snapshot(session: Session, repository_id: int) -> RepositorySnapshotR
     )
 
 
+def first_snapshot(session: Session, repository_id: int) -> RepositorySnapshotRow | None:
+    """Retourne le snapshot le plus ancien d'un repository, s'il en existe un.
+
+    Avec :func:`latest_snapshot`, il borne l'historique conservé : un rapport
+    peut dire depuis quand un dépôt est suivi.
+    """
+    return session.scalar(
+        select(RepositorySnapshotRow)
+        .where(RepositorySnapshotRow.repository_id == repository_id)
+        .order_by(RepositorySnapshotRow.collected_at)
+        .limit(1)
+    )
+
+
 def count_snapshots(session: Session, repository_id: int) -> int:
     """Compte les snapshots conservés pour un repository."""
     total = session.scalar(

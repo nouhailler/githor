@@ -5,11 +5,12 @@ GitHub, d'en collecter les métadonnées, d'en suivre l'évolution dans le temps
 (*snapshots*), d'en extraire des métriques et de détecter ce qui manque à chaque
 projet (*findings*).
 
-> **État : V0.1 en cours de développement — étapes 1 à 11 sur 13 terminées.**
+> **État : V0.1 en cours de développement — étapes 1 à 12 sur 13 terminées.**
 > `githor scan` collecte métadonnées, langages, arborescence, activité,
 > releases et issues, puis évalue les règles ; `githor findings` montre ce
-> qui manque, `githor export` produit du JSON, du CSV et du Markdown.
-> Les rapports individuels arrivent à l'étape suivante.
+> qui manque, `githor export` produit du JSON, du CSV et du Markdown, et
+> `githor report` le rapport d'un dépôt. Reste la complétion de la suite
+> de tests.
 
 Pour aller plus loin : [CONTEXT.md](CONTEXT.md) explique les partis pris et
 les invariants du projet, [CHANGELOG.md](CHANGELOG.md) retrace ce qui a été
@@ -45,10 +46,11 @@ livré étape par étape.
                        ▼
                      SQLite          src/githor/storage/
                        │
-              ┌────────┴────────┐
-              ▼                 ▼
-          Exporters          Future AI
-      src/githor/exporters/
+           ┌───────────┼───────────┐
+           ▼           ▼           ▼
+       Exporters    Reports    Future AI
+      src/githor/  src/githor/
+      exporters/     reports/
 ```
 
 La couche `github/` ne connaît ni la base de données ni la CLI. Les `collectors/`
@@ -194,6 +196,8 @@ githor findings Architecturor     # détail d'un dépôt : ce qui est là, ce qu
 githor export --format json       # export complet dans data/exports/
 githor export -f csv              # une ligne par repository
 githor export -f markdown         # inventaire lisible
+githor report Architecturor       # rapport Markdown d'un dépôt, sur stdout
+githor report NOM -o rapport.md   # le même rapport, écrit dans un fichier
 githor db init                    # crée la base SQLite et son schéma
 githor config show                # configuration effective et provenance du jeton
 githor --config f.toml <cmd>      # utilise un fichier de configuration précis
@@ -209,12 +213,6 @@ Utilisateur  nouhailler
 API          joignable (https://api.github.com)
 Quota        5000 / 5000
 Statut       OK
-```
-
-### Cible de la V0.1
-
-```bash
-githor report Architecturor       # rapport Markdown d'un repository
 ```
 
 ## Ce que le scan collecte
@@ -315,6 +313,7 @@ produit un fichier exploitable.
 │   ├── rules/        # catalogue de règles et moteur d'évaluation
 │   ├── storage/      # SQLAlchemy : schéma (tables.py) et session (database.py)
 │   ├── exporters/    # jeu de données, métriques dérivées, JSON, CSV, Markdown
+│   ├── reports/      # rapport Markdown d'un seul dépôt
 │   └── utils/        # dates et helpers
 │
 ├── tests/            # suite pytest — les appels GitHub sont toujours mockés
@@ -489,7 +488,7 @@ MarkerRule(
     category="documentation",
     label="SECURITY",
     severity=Severity.LOW,
-    marker="security",          # marqueur défini dans collectors/structure.py
+    marker="security",  # marqueur défini dans collectors/structure.py
     recommendation="Ajouter un SECURITY.md décrivant le signalement des failles.",
 )
 ```
@@ -536,6 +535,64 @@ de l'export, ce qui évite qu'un chiffre et sa source divergent. Fichiers,
 répertoires et langages viennent du dernier snapshot ; les fenêtres de commits
 sont comptées depuis la **date du snapshot**, et non depuis l'instant de
 l'export, pour qu'un même snapshot produise toujours le même chiffre.
+
+## Rapports
+
+```bash
+githor report Architecturor              # sur la sortie standard
+githor report Architecturor > rap.md     # redirigé
+githor report Architecturor -o rap.md    # dans un fichier nommé
+githor report Architecturor -o data/exports   # fichier horodaté dans un répertoire
+```
+
+Là où l'export décrit le parc entier, un rapport répond à une seule question :
+*où en est ce projet-là ?* Il se construit depuis la **même base** et le **même
+jeu de données** que l'export — il ne joint donc jamais GitHub — et décrit le
+dernier snapshot enregistré, en le datant.
+
+Le document enchaîne ce que l'on demande à un projet qu'on redécouvre : ses
+mesures, ses langages, ce qui a été vérifié, ce qui manque, et depuis quand il
+est suivi.
+
+```markdown
+# nouhailler/Architecturor
+
+*Rapport Githor 0.1.0 — généré le 2026-09-03 19:59 UTC, d'après le snapshot du 2026-09-03 08:31 UTC.*
+
+<https://github.com/nouhailler/Architecturor> — public · branche `main`
+
+## Vue d'ensemble
+
+| Metric | Value |
+|---|---:|
+| Files | 76 |
+| Languages | 3 |
+| Commits (30 d) | 153 |
+
+## Documentation
+
+| Item | Status |
+|---|---|
+| README | ✓ |
+| LICENSE | ✗ |
+| CHANGELOG | ✓ |
+
+## Constats
+
+### Élevée
+
+- tests/ absent. (`development.tests`) — *Ajouter un répertoire de tests…*
+```
+
+Les vérifications sont rendues depuis les **constats enregistrés**, jamais depuis
+le catalogue courant : un rapport montre ce qui avait été vérifié à la date du
+snapshot, et non ce que Githor saurait vérifier aujourd'hui.
+
+Sans `--output`, le Markdown part **tel quel** sur `stdout` : il n'est ni habillé
+ni replié, afin qu'un tableau reste intact dans un terminal étroit comme dans un
+tube. Avec un répertoire existant en `--output`, le fichier produit est horodaté
+(`githor-report-nouhailler-Architecturor-20260903-195935.md`) et n'écrase jamais
+le précédent.
 
 ## Logs et diagnostic
 

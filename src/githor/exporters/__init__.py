@@ -11,7 +11,7 @@ from pathlib import Path
 
 from githor.errors import StorageError
 from githor.exporters.csv_format import render_csv
-from githor.exporters.dataset import Dataset, build_dataset
+from githor.exporters.dataset import Dataset, build_dataset, build_repository_export
 from githor.exporters.json_format import render_json
 from githor.exporters.markdown_format import render_markdown
 from githor.logging import get_logger
@@ -88,6 +88,7 @@ __all__ = [
     "Dataset",
     "ExportFormat",
     "build_dataset",
+    "build_repository_export",
     "export_filename",
     "render",
     "render_csv",

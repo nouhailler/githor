@@ -99,12 +99,6 @@ Si la fenêtre téléchargée ne couvre pas 90 jours, le décompte à 90 jours e
 `None`, pas zéro. Si GitHub tronque une arborescence, Githor l'annonce au lieu
 de laisser croire à un décompte exact.
 
-## État d'avancement
-
-Onze étapes sur treize. Ce qui manque : les rapports individuels (`githor
-report`) et la complétion de la suite de tests. Le détail est dans le
-[CHANGELOG](CHANGELOG.md).
-
 ### Les métriques sont dérivées, jamais stockées
 
 Fichiers, répertoires, fenêtres de commits, décomptes d'issues : tout se calcule
@@ -117,6 +111,28 @@ toujours produire le même chiffre.
 
 Le fichier produit est horodaté. Un export est une photographie, au même titre
 qu'un snapshot ; deux exports successifs doivent pouvoir être comparés.
+
+### Un rapport dit d'un dépôt ce que l'export dit de tous
+
+`githor report` ne recalcule rien : il construit le même `RepositoryExport` que
+l'export, et n'y ajoute que l'historique conservé. Deux chemins de lecture qui
+compteraient chacun leurs fichiers finiraient par ne plus donner le même
+nombre.
+
+Ses vérifications ✓/✗ sont rendues depuis les **constats enregistrés**, non
+depuis le catalogue courant : un rapport montre ce qui avait été vérifié à la
+date du snapshot, et non ce que Githor saurait vérifier aujourd'hui.
+
+### Ce qui est produit va sur `stdout`, ce qui commente va sur `stderr`
+
+Un rapport sans `--output` est écrit tel quel, sans habillage ni repli : Rich
+casserait ses tableaux dès que le terminal est étroit, et une redirection ne
+doit jamais produire autre chose que le fichier attendu.
+
+## État d'avancement
+
+Douze étapes sur treize. Ce qui manque : la complétion de la suite de tests. Le
+détail est dans le [CHANGELOG](CHANGELOG.md).
 
 ## Conventions
 

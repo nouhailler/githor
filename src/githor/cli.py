@@ -41,6 +41,7 @@ from githor.github.user import get_authenticated_login, get_authenticated_user
 from githor.logging import get_logger, setup_logging
 from githor.models.finding import SEVERITY_LABELS, SEVERITY_ORDER, Severity, Status
 from githor.models.repository import Repository
+from githor.reports import build_report, render_report, write_report
 from githor.rules.base import RuleContext
 from githor.rules.catalog import CATEGORIES, CATEGORY_LABELS, rule_labels
 from githor.rules.engine import evaluate, open_findings
@@ -469,6 +470,63 @@ def export(
         highlight=False,
     )
     console.print(f"Écrit dans : [bold]{path}[/bold]", highlight=False)
+
+
+@app.command("report")
+def report(
+    repository: Annotated[
+        str,
+        typer.Argument(
+            metavar="REPOSITORY",
+            help="Dépôt dont on veut le rapport, par exemple Architecturor "
+            "ou nouhailler/Architecturor.",
+        ),
+    ],
+    output: Annotated[
+        Path | None,
+        typer.Option(
+            "--output",
+            "-o",
+            metavar="CHEMIN",
+            help="Écrit le rapport dans ce fichier — ou, si le chemin est un "
+            "répertoire existant, dans un fichier horodaté qu'il contient.",
+        ),
+    ] = None,
+) -> None:
+    """Produit le rapport Markdown d'un repository.
+
+    Le rapport décrit le **dernier snapshot** enregistré : comme l'export, il
+    relit la base et ne joint jamais GitHub. Sans ``--output``, il est écrit sur
+    la sortie standard, telle quelle, afin de pouvoir être redirigé.
+    """
+    config = current_config()
+    if not config.storage.database.exists():
+        console.print(
+            f"Aucune base à {config.storage.database} : lancez d'abord [bold]githor scan[/bold].",
+            highlight=False,
+        )
+        raise typer.Exit(code=1)
+
+    with open_database(config) as database:
+        database.create_schema()
+        with database.session() as session:
+            row = find_repository_by_name(session, repository)
+            if row is None:
+                console.print(
+                    f"[red]Repository inconnu de la base :[/red] {repository}", highlight=False
+                )
+                console.print("[dim]Voir githor findings sans argument.[/dim]")
+                raise typer.Exit(code=1)
+            document = build_report(session, row)
+
+    if output is None:
+        # Écriture directe : Rich habillerait et replierait le Markdown, ce qui
+        # casserait les tableaux dès que le terminal est étroit.
+        sys.stdout.write(render_report(document))
+        return
+
+    path = write_report(document, output)
+    console.print(f"Rapport écrit dans : [bold]{path}[/bold]", highlight=False)
 
 
 @app.command("findings")

@@ -828,3 +828,103 @@ def test_export_of_an_empty_database_writes_nothing(authenticated: None, tmp_pat
     assert result.exit_code == 0
     assert "Aucun repository enregistré" in plain(result.output)
     assert not exported_files(tmp_path, ".json")
+
+
+# ── Rapports (étape 12) ──────────────────────────────────────────────────────
+
+
+def test_report_writes_markdown_on_stdout(
+    httpx_mock: HTTPXMock, authenticated: None, tmp_path: Path, repository_details: None
+) -> None:
+    mock_repository_list(httpx_mock, [repo_payload()])
+    runner.invoke(cli.app, ["scan"])
+
+    result = runner.invoke(cli.app, ["report", "Architecturor"])
+
+    assert result.exit_code == 0
+    assert result.stdout.startswith("# nouhailler/Architecturor\n")
+    assert "## Vue d'ensemble" in result.stdout
+
+
+def test_report_accepts_a_full_name(
+    httpx_mock: HTTPXMock, authenticated: None, tmp_path: Path, repository_details: None
+) -> None:
+    mock_repository_list(httpx_mock, [repo_payload()])
+    runner.invoke(cli.app, ["scan"])
+
+    result = runner.invoke(cli.app, ["report", "nouhailler/Architecturor"])
+
+    assert result.exit_code == 0
+    assert "# nouhailler/Architecturor" in result.stdout
+
+
+def test_report_keeps_tables_intact_on_a_narrow_terminal(
+    httpx_mock: HTTPXMock, authenticated: None, tmp_path: Path, repository_details: None
+) -> None:
+    """Le Markdown part tel quel sur stdout : Rich le replierait et casserait les tableaux."""
+    mock_repository_list(httpx_mock, [repo_payload()])
+    runner.invoke(cli.app, ["scan"])
+
+    result = runner.invoke(cli.app, ["report", "Architecturor"], terminal_width=40)
+
+    assert "| Metric | Value |" in result.stdout
+
+
+def test_report_writes_a_file_when_asked(
+    httpx_mock: HTTPXMock, authenticated: None, tmp_path: Path, repository_details: None
+) -> None:
+    mock_repository_list(httpx_mock, [repo_payload()])
+    runner.invoke(cli.app, ["scan"])
+    destination = tmp_path / "rapport.md"
+
+    result = runner.invoke(cli.app, ["report", "Architecturor", "-o", str(destination)])
+
+    assert result.exit_code == 0
+    assert destination.read_text(encoding="utf-8").startswith("# nouhailler/Architecturor")
+    assert "# nouhailler/Architecturor" not in plain(result.output)
+
+
+def test_report_writes_a_timestamped_file_into_a_directory(
+    httpx_mock: HTTPXMock, authenticated: None, tmp_path: Path, repository_details: None
+) -> None:
+    mock_repository_list(httpx_mock, [repo_payload()])
+    runner.invoke(cli.app, ["scan"])
+    destination = tmp_path / "rapports"
+    destination.mkdir()
+
+    result = runner.invoke(cli.app, ["report", "Architecturor", "--output", str(destination)])
+
+    assert result.exit_code == 0
+    assert list(destination.glob("githor-report-nouhailler-Architecturor-*.md"))
+
+
+def test_report_never_calls_github(
+    httpx_mock: HTTPXMock, authenticated: None, tmp_path: Path, repository_details: None
+) -> None:
+    """Un rapport relit la base : il ne dépend ni du réseau ni du quota."""
+    mock_repository_list(httpx_mock, [repo_payload()])
+    runner.invoke(cli.app, ["scan"])
+    httpx_mock.reset()
+
+    result = runner.invoke(cli.app, ["report", "Architecturor"])
+
+    assert result.exit_code == 0
+    assert httpx_mock.get_requests() == []
+
+
+def test_report_of_an_unknown_repository_fails(authenticated: None, tmp_path: Path) -> None:
+    runner.invoke(cli.app, ["db", "init"])
+
+    result = runner.invoke(cli.app, ["report", "Inexistant"])
+
+    assert result.exit_code == 1
+    assert "Repository inconnu" in plain(result.output)
+
+
+def test_report_without_a_database_explains_how_to_start(
+    authenticated: None, tmp_path: Path
+) -> None:
+    result = runner.invoke(cli.app, ["report", "Architecturor"])
+
+    assert result.exit_code == 1
+    assert "githor scan" in plain(result.output)

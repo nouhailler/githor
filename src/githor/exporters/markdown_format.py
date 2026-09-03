@@ -7,10 +7,10 @@ plus souvent, et que manque-t-il à chaque projet.
 
 from collections import Counter
 from collections.abc import Iterable
-from datetime import UTC, datetime
 
 from githor.exporters.dataset import Dataset, RepositoryExport
 from githor.models.finding import SEVERITY_LABELS, SEVERITY_ORDER, Severity
+from githor.utils.markdown import ABSENT, escape_cell, format_moment, severity_label
 
 
 def render_markdown(dataset: Dataset) -> str:
@@ -18,7 +18,7 @@ def render_markdown(dataset: Dataset) -> str:
     lines: list[str] = [
         "# Inventaire Githor",
         "",
-        f"*Généré le {_moment(dataset.generated_at)} par Githor {dataset.githor_version} — "
+        f"*Généré le {format_moment(dataset.generated_at)} par Githor {dataset.githor_version} — "
         f"{dataset.repository_count} repository(s), {dataset.findings_open} constat(s) ouvert(s).*",
         "",
         "Les mesures proviennent du dernier snapshot de chaque dépôt, "
@@ -43,8 +43,8 @@ def _overview(repositories: Iterable[RepositoryExport]) -> list[str]:
         snapshot = repository.snapshot
         metrics = repository.metrics
         lines.append(
-            f"| [{_escape(repository.full_name)}]({repository.url}) "
-            f"| {_escape(snapshot.primary_language if snapshot else None) or '—'} "
+            f"| [{escape_cell(repository.full_name)}]({repository.url}) "
+            f"| {escape_cell(snapshot.primary_language if snapshot else None) or ABSENT} "
             f"| {snapshot.stars if snapshot else 0} "
             f"| {metrics.files} "
             f"| {metrics.commits_90_days} "
@@ -81,7 +81,7 @@ def _recurring_findings(repositories: Iterable[RepositoryExport]) -> list[str]:
         "|---|---|---:|",
     ]
     for (rule, severity), count in sorted(counter.items(), key=rank):
-        lines.append(f"| `{rule}` | {_severity_label(severity)} | {count} |")
+        lines.append(f"| `{rule}` | {severity_label(severity)} | {count} |")
     lines.append("")
     return lines
 
@@ -99,9 +99,9 @@ def _repository_section(repository: RepositoryExport) -> list[str]:
     snapshot = repository.snapshot
     metrics = repository.metrics
 
-    lines = [f"### {_escape(repository.full_name)}", ""]
+    lines = [f"### {escape_cell(repository.full_name)}", ""]
     if repository.description:
-        lines += [_escape(repository.description), ""]
+        lines += [escape_cell(repository.description), ""]
 
     if snapshot is None:
         lines += ["Aucun snapshot enregistré.", ""]
@@ -121,8 +121,8 @@ def _repository_section(repository: RepositoryExport) -> list[str]:
         f"| Releases | {metrics.releases} |",
         f"| Commits (30 d) | {metrics.commits_30_days} |",
         f"| Commits (90 d) | {metrics.commits_90_days} |",
-        f"| Last commit | {_moment(metrics.last_commit_at) or '—'} |",
-        f"| Snapshot | {_moment(snapshot.collected_at)} |",
+        f"| Last commit | {format_moment(metrics.last_commit_at) or ABSENT} |",
+        f"| Snapshot | {format_moment(snapshot.collected_at)} |",
         "",
     ]
 
@@ -130,7 +130,7 @@ def _repository_section(repository: RepositoryExport) -> list[str]:
         lines.append(
             "**Langages** — "
             + ", ".join(
-                f"{_escape(language.language)} {language.percentage:.1f} %"
+                f"{escape_cell(language.language)} {language.percentage:.1f} %"
                 for language in repository.languages
             )
         )
@@ -151,32 +151,11 @@ def _open_findings(repository: RepositoryExport) -> list[str]:
         group = [finding for finding in opened if finding.severity == severity]
         for finding in group:
             recommendation = (
-                f" — *{_escape(finding.recommendation)}*" if finding.recommendation else ""
+                f" — *{escape_cell(finding.recommendation)}*" if finding.recommendation else ""
             )
             lines.append(
-                f"- **{SEVERITY_LABELS[severity]}** · {_escape(finding.message)}"
+                f"- **{SEVERITY_LABELS[severity]}** · {escape_cell(finding.message)}"
                 f" (`{finding.rule}`){recommendation}"
             )
     lines.append("")
     return lines
-
-
-def _moment(moment: datetime | None) -> str:
-    """Formate une date pour un lecteur humain, à la minute près."""
-    if moment is None:
-        return ""
-    return moment.astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC")
-
-
-def _severity_label(severity: str) -> str:
-    """Traduit une gravité en libellé lisible, sans supposer qu'elle soit connue."""
-    if severity in Severity:
-        return SEVERITY_LABELS[Severity(severity)]
-    return severity
-
-
-def _escape(text: str | None) -> str:
-    """Neutralise ce qui casserait un tableau Markdown : barres verticales et retours ligne."""
-    if not text:
-        return ""
-    return text.replace("|", "\\|").replace("\n", " ").strip()

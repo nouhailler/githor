@@ -168,7 +168,7 @@ def build_dataset(session: Session, *, generated_at: datetime | None = None) -> 
         generated_at: date de génération ; maintenant par défaut.
     """
     repositories = tuple(
-        _build_repository(session, row) for row in list_stored_repositories(session)
+        build_repository_export(session, row) for row in list_stored_repositories(session)
     )
     logger.debug("Jeu de données construit : %s repository(s).", len(repositories))
     return Dataset(
@@ -179,8 +179,12 @@ def build_dataset(session: Session, *, generated_at: datetime | None = None) -> 
     )
 
 
-def _build_repository(session: Session, row: RepositoryRow) -> RepositoryExport:
-    """Rassemble tout ce qui décrit un repository dans l'export."""
+def build_repository_export(session: Session, row: RepositoryRow) -> RepositoryExport:
+    """Rassemble tout ce qui décrit un repository dans l'export.
+
+    Publique : le rapport individuel (``githor report``) décrit un seul dépôt,
+    et doit le décrire exactement comme l'export décrit chacun des siens.
+    """
     snapshot = latest_snapshot(session, row.id)
     findings = tuple(
         FindingExport(
