@@ -1,8 +1,8 @@
-# Projet : GitHub Auditor — V0.1
+# Projet : Githor — V0.1
 
 ## 1. Objectif
 
-Je souhaite développer sous Debian un outil Python personnel appelé provisoirement **GitHub Auditor**.
+Je souhaite développer sous Debian un outil Python personnel appelé **Githor**.
 
 L'objectif à terme est de pouvoir analyser l'ensemble de mes projets GitHub afin de :
 
@@ -101,7 +101,7 @@ Ne pas utiliser PyGithub pour le moment : je veux une couche API GitHub explicit
 Créer une structure proche de :
 
 ```text
-github-auditor/
+githor/
 │
 ├── pyproject.toml
 ├── README.md
@@ -157,7 +157,7 @@ github-auditor/
 │   └── test_exporters.py
 │
 ├── data/
-│   ├── github-auditor.db
+│   ├── githor.db
 │   ├── exports/
 │   └── cache/
 │
@@ -190,7 +190,7 @@ GITHUB_TOKEN
 Prévoir une commande :
 
 ```bash
-gh-auditor auth check
+githor auth check
 ```
 
 Cette commande doit :
@@ -513,7 +513,7 @@ storage
 La commande :
 
 ```bash
-gh-auditor repos
+githor repos
 ```
 
 doit afficher les repositories disponibles.
@@ -830,7 +830,7 @@ Pas d'IA dans cette partie.
 Créer :
 
 ```bash
-gh-auditor scan
+githor scan
 ```
 
 Elle doit :
@@ -855,7 +855,7 @@ Afficher une progression avec Rich.
 Exemple :
 
 ```text
-GitHub Auditor
+Githor
 
 Connecting to GitHub... ✓
 
@@ -881,7 +881,7 @@ Database updated.
 Prévoir :
 
 ```bash
-gh-auditor scan Architecturor
+githor scan Architecturor
 ```
 
 Cette commande doit scanner uniquement le repository demandé.
@@ -909,19 +909,19 @@ Prévoir trois formats.
 ## JSON
 
 ```bash
-gh-auditor export --format json
+githor export --format json
 ```
 
 ## CSV
 
 ```bash
-gh-auditor export --format csv
+githor export --format csv
 ```
 
 ## Markdown
 
 ```bash
-gh-auditor export --format markdown
+githor export --format markdown
 ```
 
 Les exports doivent être écrits dans :
@@ -937,7 +937,7 @@ data/exports/
 Pour :
 
 ```bash
-gh-auditor report Architecturor
+githor report Architecturor
 ```
 
 produire un rapport similaire à :
@@ -1006,7 +1006,7 @@ include_archived = false
 commit_history_days = 90
 
 [storage]
-database = "data/github-auditor.db"
+database = "data/githor.db"
 
 [export]
 directory = "data/exports"
@@ -1054,7 +1054,7 @@ Les exceptions internes ne doivent pas produire une stack trace énorme par déf
 Prévoir un mode debug :
 
 ```bash
-gh-auditor --debug scan
+githor --debug scan
 ```
 
 ---
@@ -1241,7 +1241,7 @@ improvement plan
 Ne pas implémenter nécessairement dans V0.1, mais concevoir la base de données pour permettre :
 
 ```bash
-gh-auditor compare
+githor compare
 ```
 
 et obtenir plus tard :
@@ -1341,7 +1341,7 @@ Exemple d'installation :
 
 ```bash
 git clone <repository>
-cd github-auditor
+cd githor
 
 python3 -m venv .venv
 source .venv/bin/activate
@@ -1353,8 +1353,8 @@ Puis :
 
 ```bash
 export GITHUB_TOKEN="..."
-gh-auditor auth check
-gh-auditor scan
+githor auth check
+githor scan
 ```
 
 ---
@@ -1364,19 +1364,19 @@ gh-auditor scan
 Le V0.1 est considéré comme terminé lorsque je peux faire :
 
 ```bash
-gh-auditor auth check
+githor auth check
 ```
 
 puis :
 
 ```bash
-gh-auditor repos
+githor repos
 ```
 
 puis :
 
 ```bash
-gh-auditor scan
+githor scan
 ```
 
 et obtenir une base SQLite contenant mes repositories et leurs snapshots.
@@ -1384,13 +1384,13 @@ et obtenir une base SQLite contenant mes repositories et leurs snapshots.
 Je dois ensuite pouvoir faire :
 
 ```bash
-gh-auditor scan Architecturor
+githor scan Architecturor
 ```
 
 puis :
 
 ```bash
-gh-auditor report Architecturor
+githor report Architecturor
 ```
 
 et obtenir un rapport Markdown.
@@ -1398,8 +1398,8 @@ et obtenir un rapport Markdown.
 Je dois également pouvoir faire :
 
 ```bash
-gh-auditor export --format json
-gh-auditor export --format csv
+githor export --format json
+githor export --format csv
 ```
 
 et obtenir les exports correspondants.
@@ -1425,7 +1425,7 @@ Créer le projet Python et `pyproject.toml`.
 Créer la CLI minimale :
 
 ```bash
-gh-auditor --help
+githor --help
 ```
 
 ### Étape 3
@@ -1438,7 +1438,7 @@ Créer `GitHubClient`.
 Implémenter :
 
 ```bash
-gh-auditor auth check
+githor auth check
 ```
 
 ### Étape 6
@@ -1476,7 +1476,7 @@ Je veux obtenir un **V0.1 réellement fonctionnel**, pas seulement un squelette.
 À la fin, je dois pouvoir lancer :
 
 ```bash
-gh-auditor scan
+githor scan
 ```
 
 sur ma machine Debian et obtenir un inventaire persistant de mes repositories GitHub avec :

@@ -145,6 +145,7 @@ comme une nouvelle source alimentant les mêmes modèles, sans réécrire l'exis
 ## Spécification d'origine
 
 Le cahier des charges initial est conservé dans le dépôt
-(`Projet _ GitHub Auditor — V0.1.md`). Il y désigne l'outil sous le nom
-`gh-auditor` : ce nom est **obsolète**, l'outil s'appelle Githor et sa commande
-est `githor`.
+([CAHIER-DES-CHARGES.md](CAHIER-DES-CHARGES.md)). Il reste la référence de ce que
+la V0.1 doit livrer, y compris ce qui n'est pas encore fait. Toute divergence
+entre ce document et le code est soit un manque à combler, soit une décision à
+consigner ici.
