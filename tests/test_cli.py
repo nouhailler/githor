@@ -584,3 +584,108 @@ def test_scan_keeps_progress_off_stdout(
     result = runner.invoke(cli.app, ["scan"])
 
     assert "Récupération des repositories" not in plain(result.stdout)
+
+
+# ── Findings (étape 10) ──────────────────────────────────────────────────────
+
+
+def finding_rows(root: Path) -> list[tuple[str, str, str]]:
+    """Retourne les constats enregistrés dans la base du répertoire donné."""
+    with sqlite3.connect(root / "data" / "githor.db") as connection:
+        return [
+            (str(rule), str(severity), str(status))
+            for rule, severity, status in connection.execute(
+                "SELECT rule, severity, status FROM findings ORDER BY rule"
+            )
+        ]
+
+
+def test_scan_evaluates_and_stores_findings(
+    httpx_mock: HTTPXMock, authenticated: None, tmp_path: Path, repository_details: None
+) -> None:
+    mock_repository_list(httpx_mock, [repo_payload()])
+
+    result = runner.invoke(cli.app, ["scan"])
+    output = plain(result.output)
+    rows = finding_rows(tmp_path)
+
+    assert result.exit_code == 0
+    assert "constat(s) évalué(s)" in output
+    # L'arborescence mockée n'a qu'un README : la règle passe, les autres ouvrent.
+    assert ("documentation.readme", "info", "ok") in rows
+    assert ("documentation.changelog", "medium", "open") in rows
+
+
+def test_findings_lists_every_scanned_repository(
+    httpx_mock: HTTPXMock, authenticated: None, tmp_path: Path, repository_details: None
+) -> None:
+    mock_repository_list(httpx_mock, [repo_payload()])
+    runner.invoke(cli.app, ["scan"])
+
+    result = runner.invoke(cli.app, ["findings"])
+    output = plain(result.output)
+
+    assert result.exit_code == 0
+    assert "nouhailler/Architecturor" in output
+    assert "constat(s) ouvert(s)" in output
+
+
+def test_findings_details_one_repository_from_a_short_name(
+    httpx_mock: HTTPXMock, authenticated: None, tmp_path: Path, repository_details: None
+) -> None:
+    mock_repository_list(httpx_mock, [repo_payload()])
+    runner.invoke(cli.app, ["scan"])
+
+    result = runner.invoke(cli.app, ["findings", "architecturor"])
+    output = plain(result.output)
+
+    assert result.exit_code == 0
+    assert "Documentation" in output
+    assert "CHANGELOG" in output
+    assert "Constats ouverts" in output
+    assert "Ajouter un CHANGELOG.md" in output
+
+
+def test_findings_never_calls_github(
+    httpx_mock: HTTPXMock, authenticated: None, tmp_path: Path, repository_details: None
+) -> None:
+    """La lecture des constats se fait sur la base, pas sur l'API."""
+    mock_repository_list(httpx_mock, [repo_payload()])
+    runner.invoke(cli.app, ["scan"])
+    httpx_mock.reset()
+
+    result = runner.invoke(cli.app, ["findings"])
+
+    assert result.exit_code == 0
+    assert httpx_mock.get_requests() == []
+
+
+def test_findings_of_an_unknown_repository_fails(authenticated: None, tmp_path: Path) -> None:
+    runner.invoke(cli.app, ["db", "init"])
+
+    result = runner.invoke(cli.app, ["findings", "NExistePas"])
+
+    assert result.exit_code == 1
+    assert "Repository inconnu" in plain(result.output)
+
+
+def test_findings_without_a_database_explains_how_to_start(
+    authenticated: None, tmp_path: Path
+) -> None:
+    result = runner.invoke(cli.app, ["findings"])
+
+    assert result.exit_code == 0
+    assert "githor scan" in plain(result.output)
+
+
+def test_findings_presents_the_synthesis_in_catalog_order(
+    httpx_mock: HTTPXMock, authenticated: None, tmp_path: Path, repository_details: None
+) -> None:
+    """La synthèse va du plus attendu au plus accessoire, comme le catalogue."""
+    mock_repository_list(httpx_mock, [repo_payload()])
+    runner.invoke(cli.app, ["scan"])
+
+    output = plain(runner.invoke(cli.app, ["findings", "Architecturor"]).output)
+
+    assert output.index("README") < output.index("LICENSE") < output.index("CHANGELOG")
+    assert output.index("Documentation") < output.index("Maintenance")

@@ -16,6 +16,7 @@ import typer
 from rich.console import Console
 from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
 from rich.table import Table
+from sqlalchemy.orm import Session
 
 from githor import __version__
 from githor.collectors.activity import collect_activity
@@ -35,16 +36,25 @@ from githor.github.repositories import get_repository
 from githor.github.token import find_token, require_token
 from githor.github.user import get_authenticated_login, get_authenticated_user
 from githor.logging import get_logger, setup_logging
+from githor.models.finding import SEVERITY_LABELS, SEVERITY_ORDER, Severity, Status
 from githor.models.repository import Repository
+from githor.rules.base import RuleContext
+from githor.rules.catalog import CATEGORIES, CATEGORY_LABELS, rule_labels
+from githor.rules.engine import evaluate, open_findings
 from githor.storage.database import Database
+from githor.storage.findings import latest_findings, save_findings
 from githor.storage.repositories import (
     add_snapshot,
     count_snapshots,
+    find_repository_by_name,
+    latest_snapshot,
+    list_stored_repositories,
     save_commits,
     save_files,
     save_languages,
     upsert_repository,
 )
+from githor.storage.tables import FindingRow, RepositoryRow
 
 console = Console()
 stderr_console = Console(stderr=True)
@@ -275,6 +285,11 @@ def scan(
         f"{totals.files} entrée(s) d'arborescence, {totals.commits} commit(s) ajouté(s).",
         highlight=False,
     )
+    console.print(
+        f"{totals.findings} constat(s) évalué(s), dont "
+        f"[bold]{totals.findings_open}[/bold] ouvert(s).",
+        highlight=False,
+    )
     console.print(f"Base : {config.storage.database}", highlight=False)
     _print_exclusions(collection)
 
@@ -314,6 +329,8 @@ class ScanTotals:
     languages: int = 0
     files: int = 0
     commits: int = 0
+    findings: int = 0
+    findings_open: int = 0
 
 
 def _persist(
@@ -347,6 +364,10 @@ def _persist(
             activity = collect_activity(
                 client, repository.full_name, days=scope.commit_history_days
             )
+            findings = evaluate(
+                RuleContext(repository=repository, markers=structure.markers, activity=activity)
+            )
+            opened = len(open_findings(findings))
 
             with database.session() as session:
                 row, is_new = upsert_repository(session, repository)
@@ -354,8 +375,10 @@ def _persist(
                 totals.languages += save_languages(session, snapshot.id, languages)
                 totals.files += save_files(session, snapshot.id, structure.files)
                 totals.commits += save_commits(session, row.id, activity.commits)
+                totals.findings += save_findings(session, row.id, snapshot.id, findings)
                 total_snapshots = count_snapshots(session, row.id)
 
+            totals.findings_open += opened
             totals.created += int(is_new)
             totals.updated += int(not is_new)
             totals.snapshots += 1
@@ -364,12 +387,184 @@ def _persist(
             console.print(
                 f"{marker} {repository.full_name} [dim](snapshot {total_snapshots} · "
                 f"{structure.file_count} fichiers · {len(languages)} langages · "
-                f"{activity.total} commits/{scope.commit_history_days}j)[/dim]",
+                f"{activity.total} commits/{scope.commit_history_days}j · "
+                f"{opened} constats)[/dim]",
                 highlight=False,
             )
             progress.advance(task)
 
     return totals
+
+
+@app.command("findings")
+def findings(
+    repository: Annotated[
+        str | None,
+        typer.Argument(
+            metavar="[REPOSITORY]",
+            help="Dépôt dont on veut le détail. Sans argument, la synthèse de tous les dépôts.",
+        ),
+    ] = None,
+) -> None:
+    """Affiche les constats du dernier snapshot enregistré.
+
+    La commande ne joint pas GitHub : elle relit la base produite par
+    ``githor scan``.
+    """
+    config = current_config()
+    if not config.storage.database.exists():
+        console.print(
+            f"Aucune base à {config.storage.database} : lancez d'abord [bold]githor scan[/bold].",
+            highlight=False,
+        )
+        return
+
+    with open_database(config) as database:
+        database.create_schema()
+        with database.session() as session:
+            if repository is None:
+                reports = [
+                    _read_findings(session, row) for row in list_stored_repositories(session)
+                ]
+            else:
+                row = find_repository_by_name(session, repository)
+                if row is None:
+                    console.print(
+                        f"[red]Repository inconnu de la base :[/red] {repository}", highlight=False
+                    )
+                    console.print("[dim]Voir githor findings sans argument.[/dim]")
+                    raise typer.Exit(code=1)
+                reports = [_read_findings(session, row)]
+
+    if not reports:
+        console.print("Aucun repository enregistré : lancez d'abord [bold]githor scan[/bold].")
+        return
+
+    if repository is None:
+        console.print(_findings_table(reports))
+        console.print(
+            f"\n[bold]{sum(report.opened for report in reports)}[/bold] constat(s) ouvert(s) "
+            f"sur {len(reports)} repository(s).",
+            highlight=False,
+        )
+        console.print("[dim]Détail d'un dépôt : githor findings NOM.[/dim]")
+        return
+
+    _print_findings_detail(reports[0])
+
+
+@dataclass
+class FindingsReport:
+    """Constats du dernier snapshot d'un repository, prêts à l'affichage."""
+
+    full_name: str
+    collected_at: datetime | None
+    findings: list[FindingRow]
+
+    @property
+    def opened(self) -> int:
+        """Nombre de constats ouverts."""
+        return sum(1 for finding in self.findings if finding.status == Status.OPEN)
+
+    @property
+    def satisfied(self) -> int:
+        """Nombre de règles satisfaites."""
+        return sum(1 for finding in self.findings if finding.status == Status.OK)
+
+    def count(self, severity: Severity) -> int:
+        """Nombre de constats ouverts d'une gravité donnée."""
+        return sum(
+            1
+            for finding in self.findings
+            if finding.status == Status.OPEN and finding.severity == severity
+        )
+
+
+def _read_findings(session: Session, row: RepositoryRow) -> FindingsReport:
+    """Rassemble les constats du dernier snapshot d'un repository."""
+    snapshot = latest_snapshot(session, row.id)
+    return FindingsReport(
+        full_name=row.full_name,
+        collected_at=snapshot.collected_at if snapshot else None,
+        findings=latest_findings(session, row.id),
+    )
+
+
+def _findings_table(reports: Sequence[FindingsReport]) -> Table:
+    """Construit le tableau récapitulatif de tous les dépôts."""
+    table = Table(show_header=True, header_style="bold", box=None, pad_edge=False)
+    table.add_column("Repository")
+    table.add_column("Snapshot")
+    table.add_column("✓", justify="right")
+    table.add_column("✗", justify="right")
+    for severity in (Severity.HIGH, Severity.MEDIUM, Severity.LOW):
+        table.add_column(SEVERITY_LABELS[severity], justify="right")
+
+    for report in reports:
+        table.add_row(
+            report.full_name,
+            _format_date(report.collected_at),
+            str(report.satisfied),
+            str(report.opened),
+            *(
+                str(report.count(severity))
+                for severity in (Severity.HIGH, Severity.MEDIUM, Severity.LOW)
+            ),
+        )
+    return table
+
+
+def _print_findings_detail(report: FindingsReport) -> None:
+    """Affiche la synthèse « ce qui manque » puis les constats ouverts d'un dépôt."""
+    console.print(f"[bold]{report.full_name}[/bold]", highlight=False)
+    if not report.findings:
+        console.print("Aucun constat enregistré : lancez [bold]githor scan[/bold] sur ce dépôt.")
+        return
+
+    console.print(f"[dim]Snapshot du {_format_date(report.collected_at)}[/dim]\n")
+
+    labels = rule_labels()
+    # Les constats reviennent triés par identifiant ; la synthèse, elle, suit
+    # l'ordre du catalogue, qui va du plus attendu au plus accessoire.
+    positions = {identifier: rank for rank, identifier in enumerate(labels)}
+    by_category: dict[str, list[FindingRow]] = {category: [] for category in CATEGORIES}
+    for finding in report.findings:
+        by_category.setdefault(finding.category, []).append(finding)
+
+    for category, findings in by_category.items():
+        findings.sort(key=lambda finding: positions.get(finding.rule, len(positions)))
+        if not findings:
+            continue
+        console.print(f"[bold]{CATEGORY_LABELS.get(category, category)}[/bold]")
+        console.print("─" * 32, style="dim")
+        grid = Table.grid(padding=(0, 2))
+        grid.add_column(width=18)
+        grid.add_column()
+        for finding in findings:
+            satisfied = finding.status == Status.OK
+            grid.add_row(
+                labels.get(finding.rule, finding.rule),
+                "[green]✓[/green]" if satisfied else "[red]✗[/red]",
+            )
+        console.print(grid)
+        console.print()
+
+    opened = [finding for finding in report.findings if finding.status == Status.OPEN]
+    if not opened:
+        console.print("[green]Aucun constat ouvert.[/green]")
+        return
+
+    console.print(f"[bold]Constats ouverts ({len(opened)})[/bold]\n")
+    for severity in SEVERITY_ORDER:
+        group = [finding for finding in opened if finding.severity == severity]
+        if not group:
+            continue
+        console.print(f"[bold]{SEVERITY_LABELS[severity]}[/bold]")
+        for finding in group:
+            console.print(f"  • {finding.message} [dim]({finding.rule})[/dim]", highlight=False)
+            if finding.recommendation:
+                console.print(f"    [dim]→ {finding.recommendation}[/dim]", highlight=False)
+        console.print()
 
 
 @app.command("repos")

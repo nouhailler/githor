@@ -5,9 +5,10 @@ GitHub, d'en collecter les métadonnées, d'en suivre l'évolution dans le temps
 (*snapshots*), d'en extraire des métriques et de détecter ce qui manque à chaque
 projet (*findings*).
 
-> **État : V0.1 en cours de développement — étapes 1 à 9 sur 13 terminées.**
-> `githor scan` collecte métadonnées, langages, arborescence et activité.
-> Les findings, les exports et les rapports arrivent aux étapes suivantes.
+> **État : V0.1 en cours de développement — étapes 1 à 10 sur 13 terminées.**
+> `githor scan` collecte métadonnées, langages, arborescence et activité,
+> puis évalue les règles ; `githor findings` montre ce qui manque.
+> Les exports et les rapports arrivent aux étapes suivantes.
 
 ---
 
@@ -183,6 +184,8 @@ githor repos --include-forks      # y compris les forks
 githor repos --include-archived   # y compris les dépôts archivés
 githor scan                       # scanne tous les dépôts et enregistre un snapshot
 githor scan Architecturor         # scanne un seul dépôt
+githor findings                   # synthèse des constats de tous les dépôts
+githor findings Architecturor     # détail d'un dépôt : ce qui est là, ce qui manque
 githor db init                    # crée la base SQLite et son schéma
 githor config show                # configuration effective et provenance du jeton
 githor --config f.toml <cmd>      # utilise un fichier de configuration précis
@@ -220,6 +223,7 @@ horaire de 5 000.
 | Langages | `/repos/…/languages` | `languages` (octets bruts **et** pourcentage) |
 | Arborescence | `/repos/…/git/trees?recursive=1` | `repository_files` |
 | Activité | `/repos/…/commits?since=…` | `commits` |
+| Constats | aucune (règles locales) | `findings` |
 
 Trois choix méritent d'être explicités :
 
@@ -291,8 +295,9 @@ produit un fichier exploitable.
 │   ├── errors.py     # exceptions applicatives (messages destinés à l'utilisateur)
 │   ├── logging.py    # configuration du logging (Rich, stderr)
 │   ├── github/       # client HTTP, résolution du jeton, erreurs
-│   ├── models/       # modèles normalisés (repository ; snapshot, activity à venir)
-│   ├── collectors/   # repositories (langages, structure, activité à venir)
+│   ├── models/       # modèles normalisés (repository, snapshot, activity, finding)
+│   ├── collectors/   # repositories, langages, structure, activité
+│   ├── rules/        # catalogue de règles et moteur d'évaluation
 │   ├── storage/      # SQLAlchemy : schéma (tables.py) et session (database.py)
 │   ├── exporters/    # JSON, CSV, Markdown
 │   └── utils/        # dates et helpers
@@ -365,12 +370,13 @@ Githor — scan
 
 Repositories à scanner : 77
 
-+ nouhailler/Architecturor (snapshot 1 · 76 fichiers · 3 langages · 190 commits/90j)
-+ nouhailler/Astror (snapshot 1 · 164 fichiers · 4 langages · 94 commits/90j)
++ nouhailler/Architecturor (snapshot 1 · 76 fichiers · 3 langages · 190 commits/90j · 5 constats)
++ nouhailler/Astror (snapshot 1 · 164 fichiers · 4 langages · 94 commits/90j · 3 constats)
 …
 
 77 repository(s) scanné(s) : 77 nouveau(x), 0 mis à jour.
 77 snapshot(s), 286 langage(s), 9827 entrée(s) d'arborescence, 1242 commit(s) ajouté(s).
+770 constat(s) évalué(s), dont 502 ouvert(s).
 ```
 
 `+` signale un dépôt découvert, `✓` un dépôt déjà connu ; le compteur entre
@@ -384,6 +390,98 @@ githor scan                  # tous les dépôts du périmètre
 githor scan Architecturor    # un seul, nom court rattaché à votre compte
 githor scan autrui/projet    # un seul, nom complet
 ```
+
+## Findings
+
+Un *finding* est un constat **déterministe** : une règle, un fait, un chemin. Aucune
+IA, aucune heuristique floue — `documentation.changelog` signifie exactement
+« aucun fichier CHANGELOG n'a été trouvé dans l'arborescence relevée ».
+
+```console
+$ githor findings
+Repository                    Snapshot    ✓  ✗  Élevée  Moyenne  Faible
+nouhailler/Architecturor      2026-09-03  5  5       1        1       3
+nouhailler/Astror             2026-09-03  7  3       0        1       2
+…
+
+502 constat(s) ouvert(s) sur 77 repository(s).
+```
+
+```console
+$ githor findings Architecturor
+nouhailler/Architecturor
+Snapshot du 2026-09-03
+
+Documentation
+────────────────────────────────
+README              ✓
+LICENSE             ✗
+CHANGELOG           ✓
+CONTRIBUTING        ✗
+docs/               ✓
+
+Development
+────────────────────────────────
+tests/              ✗
+GitHub Actions      ✓
+
+Constats ouverts (5)
+
+Élevée
+  • tests/ absent. (development.tests)
+    → Ajouter un répertoire de tests : sans tests, aucune évolution n'est vérifiable.
+```
+
+`githor findings` ne joint pas GitHub : il relit la base produite par le scan.
+
+### Règles de la V0.1
+
+| Règle | Gravité si absent | Fondement |
+|---|---|---|
+| `documentation.readme` | élevée | fichier `README*` |
+| `documentation.license` | moyenne | fichier `LICENSE` / `COPYING` |
+| `documentation.changelog` | moyenne | fichier `CHANGELOG*` |
+| `documentation.contributing` | faible | fichier `CONTRIBUTING*` |
+| `documentation.docs` | faible | répertoire `docs/` ou `doc/` |
+| `development.tests` | élevée | répertoire `tests/`, `test/` ou `spec/` |
+| `development.github_actions` | moyenne | répertoire `.github/workflows/` |
+| `infrastructure.docker` | faible | `Dockerfile` ou `Containerfile` |
+| `infrastructure.dependabot` | faible | `.github/dependabot.yml` |
+| `maintenance.activity` | moyenne | aucun push depuis 180 jours |
+
+Un dépôt **archivé** ne se voit pas reprocher son inactivité : son immobilité est
+voulue.
+
+### Deux partis pris
+
+- **les règles satisfaites sont enregistrées elles aussi**, avec le statut `ok` et la
+  gravité `info`. La table `findings` contient donc, pour chaque snapshot, l'état
+  complet de ce qui a été vérifié : la synthèse ✓/✗ se reconstitue à partir de la
+  seule base, et l'on saura plus tard **à quelle date** un projet a gagné son
+  CHANGELOG ;
+- **un constat cite ce sur quoi il se fonde**. `README présent : README.md` nomme le
+  fichier trouvé, jamais un simple booléen.
+
+### Ajouter une règle
+
+Rien n'est codé en dur dans la CLI : une règle est une entrée du catalogue
+(`src/githor/rules/catalog.py`). Pour la majorité des cas — « le fichier attendu
+est-il là ? » — il suffit d'une déclaration :
+
+```python
+MarkerRule(
+    id="documentation.security",
+    category="documentation",
+    label="SECURITY",
+    severity=Severity.LOW,
+    marker="security",          # marqueur défini dans collectors/structure.py
+    recommendation="Ajouter un SECURITY.md décrivant le signalement des failles.",
+)
+```
+
+Une règle qui demande une logique propre dérive de `Rule` et implémente `check()`,
+comme `InactivityRule`. Elle ne connaît ni GitHub ni SQLite : elle lit un
+`RuleContext` déjà collecté et rend un `Verdict`.
 
 ## Logs et diagnostic
 

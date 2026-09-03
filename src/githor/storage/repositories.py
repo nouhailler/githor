@@ -35,6 +35,29 @@ def find_repository(session: Session, github_id: int) -> RepositoryRow | None:
     return session.scalar(select(RepositoryRow).where(RepositoryRow.github_id == github_id))
 
 
+def list_stored_repositories(session: Session) -> list[RepositoryRow]:
+    """Retourne les repositories connus de la base, ordonnés par nom complet."""
+    return list(session.scalars(select(RepositoryRow).order_by(RepositoryRow.full_name)).all())
+
+
+def find_repository_by_name(session: Session, name: str) -> RepositoryRow | None:
+    """Retrouve un repository par son nom complet ou par son seul nom court.
+
+    La comparaison ignore la casse : ``architecturor`` retrouve
+    ``nouhailler/Architecturor``. Un nom court ambigu — le même dépôt chez deux
+    propriétaires — renvoie la première correspondance par ordre alphabétique,
+    l'utilisateur pouvant toujours lever le doute en donnant le nom complet.
+    """
+    lowered = name.strip().lower()
+    column = RepositoryRow.full_name if "/" in lowered else RepositoryRow.name
+    return session.scalar(
+        select(RepositoryRow)
+        .where(func.lower(column) == lowered)
+        .order_by(RepositoryRow.full_name)
+        .limit(1)
+    )
+
+
 def upsert_repository(session: Session, repository: Repository) -> tuple[RepositoryRow, bool]:
     """Crée ou met à jour la ligne d'un repository.
 
