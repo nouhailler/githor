@@ -165,18 +165,21 @@ def collect_repositories(client: GitHubClient, scan: ScanConfig) -> RepositoryCo
 
 
 def build_snapshot(
-    repository: Repository, *, collected_at: datetime | None = None
+    repository: Repository,
+    *,
+    collected_at: datetime | None = None,
+    open_prs: int | None = None,
 ) -> RepositorySnapshot:
     """Dérive un snapshot des métadonnées d'un repository.
 
-    Les compteurs proviennent de la réponse ``/user/repos`` : aucun appel
-    supplémentaire n'est nécessaire à ce stade. ``open_prs`` reste nul tant que
-    les pull requests ne sont pas comptées séparément — ``open_issues`` de
-    GitHub les inclut.
+    Les compteurs proviennent de la réponse ``/user/repos``. ``open_issues`` est
+    celui de GitHub, qui **inclut les pull requests** ; ``open_prs`` permet de
+    les isoler, une fois les issues collectées, sans réécrire le premier.
 
     Args:
         repository: modèle normalisé.
         collected_at: instant de la mesure ; maintenant par défaut.
+        open_prs: pull requests ouvertes ; nul si elles n'ont pas été comptées.
     """
     return RepositorySnapshot(
         collected_at=collected_at or utc_now(),
@@ -184,6 +187,7 @@ def build_snapshot(
         forks=repository.forks,
         watchers=repository.watchers,
         open_issues=repository.open_issues_count,
+        open_prs=open_prs,
         size_kb=repository.size_kb,
         primary_language=repository.language,
         default_branch=repository.default_branch,

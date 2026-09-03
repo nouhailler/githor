@@ -45,3 +45,14 @@ def parse_datetime(value: str | None) -> datetime | None:
         # GitHub date toujours en UTC ; une date naïve est donc de l'UTC.
         return parsed.replace(tzinfo=UTC)
     return parsed.astimezone(UTC)
+
+
+def isoformat(moment: datetime | None) -> str:
+    """Formate une date en ISO 8601 UTC, ou en chaîne vide si elle est absente.
+
+    Les exports doivent produire une date lisible par une machine, et une case
+    vide plutôt qu'un ``None`` textuel là où la donnée manque.
+    """
+    if moment is None:
+        return ""
+    return moment.astimezone(UTC).isoformat().replace("+00:00", "Z")

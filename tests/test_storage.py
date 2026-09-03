@@ -10,6 +10,8 @@ from githor.collectors.languages import compute_breakdown
 from githor.collectors.repositories import build_snapshot
 from githor.errors import GithorError, StorageError
 from githor.models.activity import Commit
+from githor.models.issue import Issue
+from githor.models.release import Release
 from githor.models.repository import Repository
 from githor.models.snapshot import RepositoryFile
 from githor.storage.database import Database
@@ -19,7 +21,9 @@ from githor.storage.repositories import (
     latest_snapshot,
     save_commits,
     save_files,
+    save_issues,
     save_languages,
+    save_releases,
     upsert_repository,
 )
 from githor.storage.tables import (
@@ -463,3 +467,79 @@ def test_saving_no_commit_is_a_no_op(database: Database) -> None:
     with database.session() as session:
         row, _ = upsert_repository(session, normalised())
         assert save_commits(session, row.id, []) == 0
+
+
+# ── Releases et issues (étape 11) ────────────────────────────────────────────
+
+
+def test_a_release_is_updated_rather_than_duplicated(database: Database) -> None:
+    """Un brouillon finit par être publié : la release se met à jour, elle ne s'accumule pas."""
+    repository_id = add_repository(database)
+
+    with database.session() as session:
+        save_releases(session, repository_id, [Release(tag="v1.0.0", draft=True)])
+    with database.session() as session:
+        save_releases(
+            session,
+            repository_id,
+            [
+                Release(
+                    tag="v1.0.0", name="Version 1", published_at=datetime(2026, 8, 1, tzinfo=UTC)
+                )
+            ],
+        )
+
+    with database.session() as session:
+        rows = session.scalars(select(ReleaseRow)).all()
+
+    assert len(rows) == 1
+    assert rows[0].draft is False
+    assert rows[0].name == "Version 1"
+
+
+def test_an_issue_follows_its_state_from_one_scan_to_the_next(database: Database) -> None:
+    repository_id = add_repository(database)
+
+    with database.session() as session:
+        save_issues(session, repository_id, [Issue(github_id=1, number=7, state="open")])
+    with database.session() as session:
+        save_issues(
+            session,
+            repository_id,
+            [
+                Issue(
+                    github_id=1,
+                    number=7,
+                    state="closed",
+                    closed_at=datetime(2026, 8, 20, tzinfo=UTC),
+                )
+            ],
+        )
+
+    with database.session() as session:
+        rows = session.scalars(select(IssueRow)).all()
+
+    assert len(rows) == 1
+    assert rows[0].state == "closed"
+    assert rows[0].closed_at == datetime(2026, 8, 20, tzinfo=UTC)
+
+
+def test_issues_of_two_repositories_do_not_collide(database: Database) -> None:
+    """Le numéro d'issue n'est unique qu'au sein d'un dépôt."""
+    first = add_repository(database)
+    second = add_repository(database, github_id=2, full_name="nouhailler/Astror", name="Astror")
+
+    with database.session() as session:
+        save_issues(session, first, [Issue(github_id=1, number=1, state="open")])
+        save_issues(session, second, [Issue(github_id=99, number=1, state="open")])
+
+    with database.session() as session:
+        assert len(session.scalars(select(IssueRow)).all()) == 2
+
+
+def test_saving_nothing_writes_nothing(database: Database) -> None:
+    repository_id = add_repository(database)
+
+    with database.session() as session:
+        assert save_releases(session, repository_id, []) == 0
+        assert save_issues(session, repository_id, []) == 0

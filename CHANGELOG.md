@@ -12,13 +12,26 @@ treize étapes sont franchies.
 
 Ce qui reste avant de figer la **0.1.0** :
 
-- collecte des issues et des releases (leurs tables existent, elles sont vides) ;
-- exports JSON, CSV et Markdown — `githor export` (étape 11) ;
 - rapports lisibles par repository — `githor report` (étape 12) ;
 - complétion de la suite de tests (étape 13).
 
 ### Ajouté
 
+- **Releases, issues et exports** *(étape 11)*.
+  - collecte des releases (tag, nom, date, brouillon, préversion) et des issues
+    (identifiant, numéro, titre, état, dates). Les unes et les autres sont
+    **mises à jour** d'un scan à l'autre : un brouillon finit par être publié,
+    une issue par se fermer ;
+  - les pull requests, que GitHub range parmi les issues, sont écartées du
+    stockage et seulement comptées — le compteur `open_issues` de GitHub les
+    inclut à tort. Le snapshot porte désormais `open_prs` ;
+  - première couche de **métriques**, dérivée des tables et jamais stockée en
+    double : fichiers, répertoires, langages, fenêtres de commits comptées depuis
+    la date du snapshot, releases, issues ouvertes et fermées, constats par
+    gravité ;
+  - `githor export --format json|csv|markdown` écrit dans `data/exports/` un
+    fichier horodaté, qui n'écrase jamais le précédent. L'export relit la base :
+    il ne joint pas GitHub, et ne dépend donc ni du réseau ni du quota.
 - **Moteur de règles et findings** *(étape 10)*.
   - modèle `Finding` — catégorie, règle, gravité, statut, message, recommandation ;
   - catalogue de dix règles déterministes couvrant la documentation

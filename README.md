@@ -5,10 +5,11 @@ GitHub, d'en collecter les métadonnées, d'en suivre l'évolution dans le temps
 (*snapshots*), d'en extraire des métriques et de détecter ce qui manque à chaque
 projet (*findings*).
 
-> **État : V0.1 en cours de développement — étapes 1 à 10 sur 13 terminées.**
-> `githor scan` collecte métadonnées, langages, arborescence et activité,
-> puis évalue les règles ; `githor findings` montre ce qui manque.
-> Les exports et les rapports arrivent aux étapes suivantes.
+> **État : V0.1 en cours de développement — étapes 1 à 11 sur 13 terminées.**
+> `githor scan` collecte métadonnées, langages, arborescence, activité,
+> releases et issues, puis évalue les règles ; `githor findings` montre ce
+> qui manque, `githor export` produit du JSON, du CSV et du Markdown.
+> Les rapports individuels arrivent à l'étape suivante.
 
 Pour aller plus loin : [CONTEXT.md](CONTEXT.md) explique les partis pris et
 les invariants du projet, [CHANGELOG.md](CHANGELOG.md) retrace ce qui a été
@@ -190,6 +191,9 @@ githor scan                       # scanne tous les dépôts et enregistre un sn
 githor scan Architecturor         # scanne un seul dépôt
 githor findings                   # synthèse des constats de tous les dépôts
 githor findings Architecturor     # détail d'un dépôt : ce qui est là, ce qui manque
+githor export --format json       # export complet dans data/exports/
+githor export -f csv              # une ligne par repository
+githor export -f markdown         # inventaire lisible
 githor db init                    # crée la base SQLite et son schéma
 githor config show                # configuration effective et provenance du jeton
 githor --config f.toml <cmd>      # utilise un fichier de configuration précis
@@ -211,14 +215,11 @@ Statut       OK
 
 ```bash
 githor report Architecturor       # rapport Markdown d'un repository
-githor export --format json       # exports dans data/exports/
-githor export --format csv
-githor export --format markdown
 ```
 
 ## Ce que le scan collecte
 
-Quatre appels par dépôt, soit environ 310 requêtes pour 77 projets, sur un quota
+Six appels par dépôt, soit environ 470 requêtes pour 78 projets, sur un quota
 horaire de 5 000.
 
 | Collecte | Source | Stocké dans |
@@ -227,6 +228,8 @@ horaire de 5 000.
 | Langages | `/repos/…/languages` | `languages` (octets bruts **et** pourcentage) |
 | Arborescence | `/repos/…/git/trees?recursive=1` | `repository_files` |
 | Activité | `/repos/…/commits?since=…` | `commits` |
+| Releases | `/repos/…/releases` | `releases` |
+| Issues | `/repos/…/issues?state=all` | `issues` |
 | Constats | aucune (règles locales) | `findings` |
 
 Trois choix méritent d'être explicités :
@@ -238,7 +241,12 @@ Trois choix méritent d'être explicités :
   défaut). Les décomptes sur 30 et 90 jours ne sont produits que si la fenêtre
   les couvre : une valeur absente vaut mieux qu'un chiffre faux ;
 - **un commit est un fait daté** : il est ajouté s'il manque, jamais réécrit. Des
-  scans qui se recouvrent ne créent donc aucun doublon.
+  scans qui se recouvrent ne créent donc aucun doublon. Releases et issues, elles,
+  sont **mises à jour** : un brouillon finit par être publié, une issue par se
+  fermer ;
+- **les pull requests ne sont pas des issues**. GitHub les range dans la même
+  collection ; Githor stocke les issues et se contente de compter les pull requests
+  ouvertes, que le compteur `open_issues` de GitHub inclut à tort.
 
 Un dépôt sans aucun commit — GitHub répond alors HTTP 409 — produit des collectes
 vides, et non une erreur.
@@ -292,6 +300,7 @@ produit un fichier exploitable.
 ├── README.md        # ce que fait Githor, et comment s'en servir
 ├── CONTEXT.md       # pourquoi il est construit ainsi : partis pris, invariants
 ├── CHANGELOG.md     # ce qui a été livré, étape par étape
+├── CAHIER-DES-CHARGES.md  # la spécification d'origine de la V0.1
 ├── LICENSE
 ├── .gitignore
 │
@@ -301,11 +310,11 @@ produit un fichier exploitable.
 │   ├── errors.py     # exceptions applicatives (messages destinés à l'utilisateur)
 │   ├── logging.py    # configuration du logging (Rich, stderr)
 │   ├── github/       # client HTTP, résolution du jeton, erreurs
-│   ├── models/       # modèles normalisés (repository, snapshot, activity, finding)
-│   ├── collectors/   # repositories, langages, structure, activité
+│   ├── models/       # repository, snapshot, activity, release, issue, finding
+│   ├── collectors/   # repositories, langages, structure, activité, releases, issues
 │   ├── rules/        # catalogue de règles et moteur d'évaluation
 │   ├── storage/      # SQLAlchemy : schéma (tables.py) et session (database.py)
-│   ├── exporters/    # JSON, CSV, Markdown
+│   ├── exporters/    # jeu de données, métriques dérivées, JSON, CSV, Markdown
 │   └── utils/        # dates et helpers
 │
 ├── tests/            # suite pytest — les appels GitHub sont toujours mockés
@@ -488,6 +497,45 @@ MarkerRule(
 Une règle qui demande une logique propre dérive de `Rule` et implémente `check()`,
 comme `InactivityRule`. Elle ne connaît ni GitHub ni SQLite : elle lit un
 `RuleContext` déjà collecté et rend un `Verdict`.
+
+## Exports
+
+```bash
+githor export --format json       # tout, sans perte
+githor export --format csv        # une ligne par repository, pour un tableur
+githor export --format markdown   # un inventaire qui se lit
+githor export -f json -o /tmp     # ailleurs que dans data/exports/
+```
+
+Un export décrit le **dernier snapshot** de chaque dépôt : il ne joint pas GitHub,
+et ne dépend donc ni du réseau ni du quota. Le fichier produit est **horodaté**
+(`githor-20260903-083426.json`) : un export n'écrase jamais le précédent, au même
+titre qu'un snapshot n'écrase pas la mesure d'avant.
+
+| Format | Contient | Sert à |
+|---|---|---|
+| JSON | tout : métadonnées, snapshot, métriques, langages, constats, releases | rejouer, comparer, alimenter un autre outil |
+| CSV | une ligne par dépôt, valeurs aplaties en décomptes | trier, filtrer, ouvrir dans un tableur |
+| Markdown | vue d'ensemble, constats les plus fréquents, détail par dépôt | se lire |
+
+Le Markdown ouvre sur ce qui est le plus utile quand on a 78 projets — ce qui
+manque le plus souvent, donc ce qu'on gagnerait à corriger une fois pour toutes :
+
+```markdown
+| Règle | Gravité | Dépôts concernés |
+|---|---|---:|
+| `infrastructure.dependabot` | Faible | 78 |
+| `development.tests` | Élevée | 72 |
+| `documentation.license` | Moyenne | 63 |
+```
+
+### Métriques
+
+Les métriques ne sont pas stockées : elles sont **dérivées** des tables au moment
+de l'export, ce qui évite qu'un chiffre et sa source divergent. Fichiers,
+répertoires et langages viennent du dernier snapshot ; les fenêtres de commits
+sont comptées depuis la **date du snapshot**, et non depuis l'instant de
+l'export, pour qu'un même snapshot produise toujours le même chiffre.
 
 ## Logs et diagnostic
 

@@ -13,11 +13,15 @@ from sqlalchemy.orm import Session
 
 from githor.logging import get_logger
 from githor.models.activity import Commit
+from githor.models.issue import Issue
+from githor.models.release import Release
 from githor.models.repository import Repository
 from githor.models.snapshot import Language, RepositoryFile, RepositorySnapshot
 from githor.storage.tables import (
     CommitRow,
+    IssueRow,
     LanguageRow,
+    ReleaseRow,
     RepositoryFileRow,
     RepositoryRow,
     RepositorySnapshotRow,
@@ -212,3 +216,77 @@ def save_commits(session: Session, repository_id: int, commits: Sequence[Commit]
     )
     session.flush()
     return len(added)
+
+
+def save_releases(session: Session, repository_id: int, releases: Sequence[Release]) -> int:
+    """Crée ou met à jour les releases d'un repository.
+
+    Une release n'est pas figée : un brouillon finit par être publié, un nom se
+    corrige. Elle est donc mise à jour, et non accumulée — le tag l'identifie.
+
+    Returns:
+        Le nombre de releases créées ou mises à jour.
+    """
+    if not releases:
+        return 0
+
+    known = {
+        row.tag: row
+        for row in session.scalars(
+            select(ReleaseRow).where(
+                ReleaseRow.repository_id == repository_id,
+                ReleaseRow.tag.in_([release.tag for release in releases]),
+            )
+        ).all()
+    }
+
+    for release in releases:
+        row = known.get(release.tag)
+        if row is None:
+            row = ReleaseRow(repository_id=repository_id, tag=release.tag)
+            session.add(row)
+        row.name = release.name
+        row.published_at = release.published_at
+        row.draft = release.draft
+        row.prerelease = release.prerelease
+
+    session.flush()
+    return len(releases)
+
+
+def save_issues(session: Session, repository_id: int, issues: Sequence[Issue]) -> int:
+    """Crée ou met à jour les issues d'un repository.
+
+    Une issue change d'état : elle se ferme, se rouvre, son titre se corrige.
+    C'est le numéro, stable dans le dépôt, qui l'identifie d'un scan à l'autre.
+
+    Returns:
+        Le nombre d'issues créées ou mises à jour.
+    """
+    if not issues:
+        return 0
+
+    known = {
+        row.number: row
+        for row in session.scalars(
+            select(IssueRow).where(
+                IssueRow.repository_id == repository_id,
+                IssueRow.number.in_([issue.number for issue in issues]),
+            )
+        ).all()
+    }
+
+    for issue in issues:
+        row = known.get(issue.number)
+        if row is None:
+            row = IssueRow(repository_id=repository_id, number=issue.number)
+            session.add(row)
+        row.github_id = issue.github_id
+        row.title = issue.title
+        row.state = issue.state
+        row.created_at = issue.created_at
+        row.updated_at = issue.updated_at
+        row.closed_at = issue.closed_at
+
+    session.flush()
+    return len(issues)

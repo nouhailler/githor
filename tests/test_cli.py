@@ -1,5 +1,6 @@
 """Tests de la CLI : aide, version, options globales, erreurs, `config show`."""
 
+import json
 import logging
 import re
 import sqlite3
@@ -473,6 +474,38 @@ def repository_details(httpx_mock: HTTPXMock) -> None:
         ],
         is_reusable=True,
     )
+    httpx_mock.add_response(
+        url=re.compile(r".*/releases.*"),
+        json=[
+            {
+                "tag_name": "v0.1.0",
+                "name": "Première version",
+                "published_at": "2026-08-01T09:00:00Z",
+            }
+        ],
+        is_reusable=True,
+    )
+    httpx_mock.add_response(
+        url=re.compile(r".*/issues.*"),
+        json=[
+            {
+                "id": 501,
+                "number": 1,
+                "title": "Documenter l'installation",
+                "state": "open",
+                "created_at": "2026-08-02T09:00:00Z",
+            },
+            # GitHub range les pull requests parmi les issues : elle doit être écartée.
+            {
+                "id": 502,
+                "number": 2,
+                "title": "Corriger le scan",
+                "state": "open",
+                "pull_request": {},
+            },
+        ],
+        is_reusable=True,
+    )
 
 
 def snapshot_count(root: Path) -> int:
@@ -689,3 +722,109 @@ def test_findings_presents_the_synthesis_in_catalog_order(
 
     assert output.index("README") < output.index("LICENSE") < output.index("CHANGELOG")
     assert output.index("Documentation") < output.index("Maintenance")
+
+
+# ── Export (étape 11) ────────────────────────────────────────────────────────
+
+
+def exported_files(root: Path, suffix: str) -> list[Path]:
+    """Retourne les exports d'un format donné écrits sous le répertoire de travail."""
+    return sorted((root / "data" / "exports").glob(f"githor-*{suffix}"))
+
+
+def test_export_writes_a_json_file(
+    httpx_mock: HTTPXMock, authenticated: None, tmp_path: Path, repository_details: None
+) -> None:
+    mock_repository_list(httpx_mock, [repo_payload()])
+    runner.invoke(cli.app, ["scan"])
+
+    result = runner.invoke(cli.app, ["export", "--format", "json"])
+    files = exported_files(tmp_path, ".json")
+
+    assert result.exit_code == 0
+    assert len(files) == 1
+    payload = json.loads(files[0].read_text(encoding="utf-8"))
+    assert payload["repository_count"] == 1
+    assert payload["repositories"][0]["full_name"] == "nouhailler/Architecturor"
+
+
+def test_export_defaults_to_json(
+    httpx_mock: HTTPXMock, authenticated: None, tmp_path: Path, repository_details: None
+) -> None:
+    mock_repository_list(httpx_mock, [repo_payload()])
+    runner.invoke(cli.app, ["scan"])
+
+    result = runner.invoke(cli.app, ["export"])
+
+    assert result.exit_code == 0
+    assert exported_files(tmp_path, ".json")
+
+
+def test_export_writes_csv_and_markdown(
+    httpx_mock: HTTPXMock, authenticated: None, tmp_path: Path, repository_details: None
+) -> None:
+    mock_repository_list(httpx_mock, [repo_payload()])
+    runner.invoke(cli.app, ["scan"])
+
+    runner.invoke(cli.app, ["export", "-f", "csv"])
+    runner.invoke(cli.app, ["export", "-f", "markdown"])
+
+    assert exported_files(tmp_path, ".csv")
+    assert (
+        exported_files(tmp_path, ".md")[0]
+        .read_text(encoding="utf-8")
+        .startswith("# Inventaire Githor")
+    )
+
+
+def test_export_honours_the_output_option(
+    httpx_mock: HTTPXMock, authenticated: None, tmp_path: Path, repository_details: None
+) -> None:
+    mock_repository_list(httpx_mock, [repo_payload()])
+    runner.invoke(cli.app, ["scan"])
+    destination = tmp_path / "ailleurs"
+
+    result = runner.invoke(cli.app, ["export", "--output", str(destination)])
+
+    assert result.exit_code == 0
+    assert list(destination.glob("githor-*.json"))
+
+
+def test_export_never_calls_github(
+    httpx_mock: HTTPXMock, authenticated: None, tmp_path: Path, repository_details: None
+) -> None:
+    """Un export décrit le dernier scan ; il ne réinterroge pas GitHub."""
+    mock_repository_list(httpx_mock, [repo_payload()])
+    runner.invoke(cli.app, ["scan"])
+    httpx_mock.reset()
+
+    result = runner.invoke(cli.app, ["export"])
+
+    assert result.exit_code == 0
+    assert httpx_mock.get_requests() == []
+
+
+def test_export_rejects_an_unknown_format(authenticated: None) -> None:
+    result = runner.invoke(cli.app, ["export", "--format", "yaml"])
+
+    assert result.exit_code != 0
+
+
+def test_export_without_a_database_explains_how_to_start(
+    authenticated: None, tmp_path: Path
+) -> None:
+    result = runner.invoke(cli.app, ["export"])
+
+    assert result.exit_code == 0
+    assert "githor scan" in plain(result.output)
+    assert not exported_files(tmp_path, ".json")
+
+
+def test_export_of_an_empty_database_writes_nothing(authenticated: None, tmp_path: Path) -> None:
+    runner.invoke(cli.app, ["db", "init"])
+
+    result = runner.invoke(cli.app, ["export"])
+
+    assert result.exit_code == 0
+    assert "Aucun repository enregistré" in plain(result.output)
+    assert not exported_files(tmp_path, ".json")

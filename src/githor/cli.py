@@ -20,7 +20,9 @@ from sqlalchemy.orm import Session
 
 from githor import __version__
 from githor.collectors.activity import collect_activity
+from githor.collectors.issues import collect_issues
 from githor.collectors.languages import collect_languages
+from githor.collectors.releases import collect_releases
 from githor.collectors.repositories import (
     RepositoryCollection,
     build_snapshot,
@@ -30,6 +32,7 @@ from githor.collectors.repositories import (
 from githor.collectors.structure import collect_structure
 from githor.config import Config, ScanConfig, load_config
 from githor.errors import GithorError
+from githor.exporters import ExportFormat, build_dataset, write_export
 from githor.github.client import GitHubClient, RateLimit
 from githor.github.errors import NotFoundError
 from githor.github.repositories import get_repository
@@ -51,7 +54,9 @@ from githor.storage.repositories import (
     list_stored_repositories,
     save_commits,
     save_files,
+    save_issues,
     save_languages,
+    save_releases,
     upsert_repository,
 )
 from githor.storage.tables import FindingRow, RepositoryRow
@@ -286,6 +291,10 @@ def scan(
         highlight=False,
     )
     console.print(
+        f"{totals.releases} release(s) et {totals.issues} issue(s) enregistrées.",
+        highlight=False,
+    )
+    console.print(
         f"{totals.findings} constat(s) évalué(s), dont "
         f"[bold]{totals.findings_open}[/bold] ouvert(s).",
         highlight=False,
@@ -331,6 +340,8 @@ class ScanTotals:
     commits: int = 0
     findings: int = 0
     findings_open: int = 0
+    releases: int = 0
+    issues: int = 0
 
 
 def _persist(
@@ -364,6 +375,8 @@ def _persist(
             activity = collect_activity(
                 client, repository.full_name, days=scope.commit_history_days
             )
+            releases = collect_releases(client, repository.full_name)
+            issues = collect_issues(client, repository.full_name)
             findings = evaluate(
                 RuleContext(repository=repository, markers=structure.markers, activity=activity)
             )
@@ -371,10 +384,16 @@ def _persist(
 
             with database.session() as session:
                 row, is_new = upsert_repository(session, repository)
-                snapshot = add_snapshot(session, row.id, build_snapshot(repository))
+                snapshot = add_snapshot(
+                    session,
+                    row.id,
+                    build_snapshot(repository, open_prs=issues.open_pull_requests),
+                )
                 totals.languages += save_languages(session, snapshot.id, languages)
                 totals.files += save_files(session, snapshot.id, structure.files)
                 totals.commits += save_commits(session, row.id, activity.commits)
+                totals.releases += save_releases(session, row.id, releases)
+                totals.issues += save_issues(session, row.id, issues.issues)
                 totals.findings += save_findings(session, row.id, snapshot.id, findings)
                 total_snapshots = count_snapshots(session, row.id)
 
@@ -394,6 +413,62 @@ def _persist(
             progress.advance(task)
 
     return totals
+
+
+@app.command("export")
+def export(
+    export_format: Annotated[
+        ExportFormat,
+        typer.Option(
+            "--format",
+            "-f",
+            case_sensitive=False,
+            help="Format de sortie.",
+        ),
+    ] = ExportFormat.JSON,
+    output: Annotated[
+        Path | None,
+        typer.Option(
+            "--output",
+            "-o",
+            metavar="RÉPERTOIRE",
+            help="Répertoire de destination, au lieu de celui de la configuration.",
+        ),
+    ] = None,
+) -> None:
+    """Exporte le contenu de la base dans data/exports/.
+
+    L'export décrit le dernier snapshot de chaque dépôt : il ne joint pas
+    GitHub, et n'écrase jamais un export précédent — le nom du fichier est
+    horodaté.
+    """
+    config = current_config()
+    if not config.storage.database.exists():
+        console.print(
+            f"Aucune base à {config.storage.database} : lancez d'abord [bold]githor scan[/bold].",
+            highlight=False,
+        )
+        return
+
+    directory = output or config.export.directory
+
+    with open_database(config) as database:
+        database.create_schema()
+        with database.session() as session:
+            dataset = build_dataset(session)
+
+    if not dataset.repositories:
+        console.print("Aucun repository enregistré : lancez d'abord [bold]githor scan[/bold].")
+        return
+
+    path = write_export(dataset, export_format, directory)
+
+    console.print(
+        f"Export [bold]{export_format}[/bold] : {dataset.repository_count} repository(s), "
+        f"{dataset.findings_open} constat(s) ouvert(s).",
+        highlight=False,
+    )
+    console.print(f"Écrit dans : [bold]{path}[/bold]", highlight=False)
 
 
 @app.command("findings")

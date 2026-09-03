@@ -3,6 +3,7 @@
 Les réponses GitHub sont mockées : aucun appel réseau, aucun jeton réel.
 """
 
+import re
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -11,7 +12,9 @@ from pydantic import ValidationError
 from pytest_httpx import HTTPXMock
 
 from githor.collectors.activity import collect_activity, normalise_commit, summarise
+from githor.collectors.issues import collect_issues, normalise_issue, sort_out
 from githor.collectors.languages import collect_languages, compute_breakdown
+from githor.collectors.releases import collect_releases, normalise_release
 from githor.collectors.repositories import (
     collect_repositories,
     keep_repository,
@@ -521,3 +524,100 @@ def test_activity_requests_only_the_configured_window(httpx_mock: HTTPXMock) -> 
     assert request is not None
     since = datetime.fromisoformat(request.url.params["since"].replace("Z", "+00:00"))
     assert 29 <= (utc_now() - since).days <= 30
+
+
+# ── Releases et issues (étape 11) ────────────────────────────────────────────
+
+
+def test_a_release_is_normalised_field_by_field() -> None:
+    release = normalise_release(
+        {
+            "tag_name": "v1.2.0",
+            "name": "Version 1.2",
+            "published_at": "2026-08-01T10:00:00Z",
+            "draft": False,
+            "prerelease": True,
+        }
+    )
+
+    assert release is not None
+    assert release.tag == "v1.2.0"
+    assert release.name == "Version 1.2"
+    assert release.published_at == datetime(2026, 8, 1, 10, 0, tzinfo=UTC)
+    assert release.prerelease is True
+
+
+def test_a_release_without_tag_is_ignored() -> None:
+    """Une release illisible ne doit pas interrompre la collecte du dépôt."""
+    assert normalise_release({"name": "Sans tag"}) is None
+
+
+def test_a_draft_release_has_no_publication_date() -> None:
+    release = normalise_release({"tag_name": "v2.0.0", "draft": True, "published_at": None})
+
+    assert release is not None
+    assert release.draft is True
+    assert release.published_at is None
+
+
+def test_pull_requests_are_separated_from_issues() -> None:
+    """GitHub range les pull requests parmi les issues : Githor les sépare."""
+    collection = sort_out(
+        [
+            {"id": 1, "number": 1, "title": "Bogue", "state": "open"},
+            {"id": 2, "number": 2, "title": "Corrigé", "state": "closed"},
+            {"id": 3, "number": 3, "title": "Une PR", "state": "open", "pull_request": {}},
+            {"id": 4, "number": 4, "title": "PR fermée", "state": "closed", "pull_request": {}},
+        ]
+    )
+
+    assert [issue.number for issue in collection.issues] == [1, 2]
+    assert collection.open_issues == 1
+    assert collection.closed_issues == 1
+    assert collection.open_pull_requests == 1
+
+
+def test_an_unreadable_issue_is_ignored_without_stopping_the_others() -> None:
+    collection = sort_out([{"id": 1, "number": 1, "state": "open"}, {"title": "sans identifiant"}])
+
+    assert len(collection.issues) == 1
+
+
+def test_issue_dates_are_parsed_in_utc() -> None:
+    issue = normalise_issue(
+        {
+            "id": 7,
+            "number": 12,
+            "title": "Titre",
+            "state": "closed",
+            "created_at": "2026-01-02T03:04:05Z",
+            "closed_at": "2026-02-03T04:05:06Z",
+        }
+    )
+
+    assert issue is not None
+    assert issue.created_at == datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
+    assert issue.closed_at == datetime(2026, 2, 3, 4, 5, 6, tzinfo=UTC)
+    assert issue.is_open is False
+
+
+def test_collect_releases_returns_an_empty_list_for_a_repository_without_release(
+    httpx_mock: HTTPXMock,
+) -> None:
+    httpx_mock.add_response(url=re.compile(r".*/releases.*"), json=[])
+
+    with GitHubClient("jeton") as client:
+        assert collect_releases(client, "nouhailler/Architecturor") == []
+
+
+def test_collect_issues_survives_a_repository_without_issue_tracker(
+    httpx_mock: HTTPXMock,
+) -> None:
+    """Le suivi d'issues désactivé produit un 404 : une collection vide, pas une erreur."""
+    httpx_mock.add_response(url=re.compile(r".*/issues.*"), status_code=404, json={})
+
+    with GitHubClient("jeton") as client:
+        collection = collect_issues(client, "nouhailler/Architecturor")
+
+    assert collection.issues == ()
+    assert collection.open_pull_requests == 0

@@ -88,7 +88,7 @@ plus tard **à quelle date** un projet a gagné son CHANGELOG.
 
 ### Ne pas surcharger GitHub
 
-Quatre appels par dépôt, soit environ 310 requêtes pour 77 projets sur un quota
+Six appels par dépôt, soit environ 470 requêtes pour 78 projets sur un quota
 horaire de 5 000. L'arborescence est récupérée en **un seul** appel récursif ;
 seule la fenêtre d'historique configurée est téléchargée. Un quota bas avertit,
 un quota épuisé **arrête** — Githor n'attend jamais une heure en silence.
@@ -101,9 +101,22 @@ de laisser croire à un décompte exact.
 
 ## État d'avancement
 
-Dix étapes sur treize. Ce qui manque : la collecte des issues et des releases
-(leurs tables existent et sont vides), les exports, les rapports, et la
-complétion de la suite de tests. Le détail est dans le [CHANGELOG](CHANGELOG.md).
+Onze étapes sur treize. Ce qui manque : les rapports individuels (`githor
+report`) et la complétion de la suite de tests. Le détail est dans le
+[CHANGELOG](CHANGELOG.md).
+
+### Les métriques sont dérivées, jamais stockées
+
+Fichiers, répertoires, fenêtres de commits, décomptes d'issues : tout se calcule
+à la lecture, depuis les tables. Stocker un chiffre à côté de sa source, c'est
+accepter qu'ils divergent un jour. Les fenêtres de commits se comptent depuis la
+**date du snapshot**, non depuis l'instant de l'export : un même snapshot doit
+toujours produire le même chiffre.
+
+### Un export ne remplace pas le précédent
+
+Le fichier produit est horodaté. Un export est une photographie, au même titre
+qu'un snapshot ; deux exports successifs doivent pouvoir être comparés.
 
 ## Conventions
 

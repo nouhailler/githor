@@ -19,9 +19,17 @@ REPOSITORY_PATH = "/repos/{full_name}"
 LANGUAGES_PATH = "/repos/{full_name}/languages"
 TREE_PATH = "/repos/{full_name}/git/trees/{ref}"
 COMMITS_PATH = "/repos/{full_name}/commits"
+RELEASES_PATH = "/repos/{full_name}/releases"
+ISSUES_PATH = "/repos/{full_name}/issues"
 
 MAX_COMMIT_PAGES = 10
 """Borne de sécurité : 1 000 commits suffisent à mesurer une activité récente."""
+
+MAX_RELEASE_PAGES = 3
+"""Borne de sécurité : 300 releases suffisent à juger de la maturité d'un dépôt."""
+
+MAX_ISSUE_PAGES = 5
+"""Borne de sécurité : 500 issues suffisent aux métriques du V0.1."""
 
 
 def list_repositories(client: GitHubClient) -> Iterator[dict[str, Any]]:
@@ -111,4 +119,29 @@ def list_commits(
         COMMITS_PATH.format(full_name=full_name),
         params={"since": since.isoformat().replace("+00:00", "Z")},
         max_pages=MAX_COMMIT_PAGES,
+    )
+
+
+def list_releases(client: GitHubClient, full_name: str) -> Iterator[dict[str, Any]]:
+    """Parcourt les releases d'un repository, de la plus récente à la plus ancienne.
+
+    Les brouillons ne sont visibles que des utilisateurs ayant les droits
+    d'écriture ; leur absence n'est pas une anomalie.
+    """
+    yield from client.get_paginated(
+        RELEASES_PATH.format(full_name=full_name), max_pages=MAX_RELEASE_PAGES
+    )
+
+
+def list_issues(client: GitHubClient, full_name: str) -> Iterator[dict[str, Any]]:
+    """Parcourt les issues d'un repository, ouvertes comme fermées.
+
+    GitHub range les pull requests parmi les issues : le tri des unes et des
+    autres relève de :mod:`githor.collectors.issues`, qui dispose de la charge
+    utile complète.
+    """
+    yield from client.get_paginated(
+        ISSUES_PATH.format(full_name=full_name),
+        params={"state": "all", "sort": "created", "direction": "desc"},
+        max_pages=MAX_ISSUE_PAGES,
     )
