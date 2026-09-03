@@ -10,6 +10,10 @@ projet (*findings*).
 > puis évalue les règles ; `githor findings` montre ce qui manque.
 > Les exports et les rapports arrivent aux étapes suivantes.
 
+Pour aller plus loin : [CONTEXT.md](CONTEXT.md) explique les partis pris et
+les invariants du projet, [CHANGELOG.md](CHANGELOG.md) retrace ce qui a été
+livré étape par étape.
+
 ---
 
 ## Principes
@@ -285,7 +289,9 @@ produit un fichier exploitable.
 
 ```text
 ├── pyproject.toml
-├── README.md
+├── README.md        # ce que fait Githor, et comment s'en servir
+├── CONTEXT.md       # pourquoi il est construit ainsi : partis pris, invariants
+├── CHANGELOG.md     # ce qui a été livré, étape par étape
 ├── LICENSE
 ├── .gitignore
 │
