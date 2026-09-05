@@ -2,15 +2,18 @@
 
 Outil **local**, **CLI** et **lecture seule** permettant d'inventorier ses repositories
 GitHub, d'en collecter les métadonnées, d'en suivre l'évolution dans le temps
-(*snapshots*), d'en extraire des métriques et de détecter ce qui manque à chaque
-projet (*findings*).
+(*snapshots*), d'en analyser le code source, d'en extraire des métriques et de
+détecter ce qui manque à chaque projet (*findings*).
 
-> **État : V0.1 en cours de développement — étapes 1 à 12 sur 13 terminées.**
-> `githor scan` collecte métadonnées, langages, arborescence, activité,
-> releases et issues, puis évalue les règles ; `githor findings` montre ce
-> qui manque, `githor export` produit du JSON, du CSV et du Markdown, et
-> `githor report` le rapport d'un dépôt. Reste la complétion de la suite
-> de tests.
+> **État : V0.2 — Code Auditor.** La [0.1.0](CHANGELOG.md) a livré l'inventaire :
+> `githor scan` collecte métadonnées, langages, arborescence, activité, releases
+> et issues, puis évalue les règles ; `githor findings` montre ce qui manque,
+> `githor export` produit du JSON, du CSV et du Markdown, et `githor report`
+> le rapport d'un dépôt.
+>
+> La V0.2 y ajoute l'analyse du code lui-même : `githor mirror` clone les dépôts
+> localement, `githor audit` en lit les lignes, la structure, la complexité, les
+> imports, les dépendances déclarées et les tests.
 
 Pour aller plus loin : [CONTEXT.md](CONTEXT.md) explique les partis pris et
 les invariants du projet, [CHANGELOG.md](CHANGELOG.md) retrace ce qui a été
@@ -21,8 +24,9 @@ livré étape par étape.
 ## Principes
 
 - **Local** — aucune donnée n'est envoyée ailleurs que vers l'API GitHub.
-- **Lecture seule** — la V0.1 ne modifie aucun repository, issue, branche ou fichier.
-- **Déterministe** — aucune IA dans la V0.1 ; un *finding* s'explique toujours par un fait vérifiable.
+- **Lecture seule** — Githor ne modifie aucun repository, issue, branche ou fichier.
+  Le clone local sert à lire ; il n'y a ni `push`, ni tag, ni écriture d'aucune sorte.
+- **Déterministe** — aucune IA avant la V0.4 ; un *finding* s'explique toujours par un fait vérifiable.
 - **Sans secret stocké** — le token vit uniquement dans `GITHUB_TOKEN`, jamais dans le dépôt,
   jamais dans SQLite, jamais dans les exports.
 - **Historique préservé** — chaque scan crée un snapshot, il n'écrase pas le précédent.
@@ -37,10 +41,15 @@ livré étape par étape.
                        │
                        ▼
               Normalized Models       src/githor/models/
-                       │
-          ┌────────────┼────────────┐
+                       ▲
+                       │                Clone local     src/githor/vcs/
+                       │                     │
+                       │                     ▼
+                       │              Analyse du code   src/githor/analysis/
+                       │                     │
+          ┌────────────┼────────────┬────────┘
           ▼            ▼            ▼
-       Metrics      Findings      Snapshot
+       Metrics      Findings   Snapshot / Audit
           │            │            │
           └────────────┼────────────┘
                        ▼
@@ -55,6 +64,11 @@ livré étape par étape.
 
 La couche `github/` ne connaît ni la base de données ni la CLI. Les `collectors/`
 font le pont entre l'API et les modèles normalisés.
+
+`vcs/` et `analysis/` forment la **seconde source**, indépendante de la première :
+l'une lit l'API GitHub, l'autre lit des fichiers sur disque, et toutes deux
+alimentent les mêmes modèles. C'est ce découpage qui a permis d'ajouter l'analyse
+de code sans rien réécrire de la V0.1.
 
 ## Prérequis
 
@@ -147,6 +161,12 @@ include_archived = false
 commit_history_days = 90             # profondeur d'historique, 1 à 3650 jours
 snapshot_freshness_hours = 0         # dispense de remesurer un dépôt récent, 0 à 8760 heures
 
+[audit]
+workspace = "data/repos"             # où les dépôts sont clonés pour être analysés
+clone_depth = 1                      # profondeur du clone superficiel, 0 = tout l'historique
+git_timeout_seconds = 300            # délai accordé à chaque commande git
+max_file_bytes = 1000000             # au-delà, un fichier est compté sans être analysé
+
 [storage]
 database = "data/githor.db"
 
@@ -199,6 +219,13 @@ githor export --format json       # export complet dans data/exports/
 githor export -f csv              # une ligne par repository
 githor export -f markdown         # inventaire lisible
 githor report Architecturor       # rapport Markdown d'un dépôt, sur stdout
+githor mirror                     # clone ou met à jour la copie locale des dépôts
+githor mirror Architecturor       # un seul dépôt
+githor mirror --offline           # n'interroge pas l'origine
+githor audit                      # analyse le code de tous les dépôts
+githor audit Architecturor        # analyse détaillée d'un seul dépôt
+githor audit --offline            # analyse les miroirs déjà présents, sans réseau
+githor audit --no-save            # regarde sans rien écrire en base
 githor report NOM -o rapport.md   # le même rapport, écrit dans un fichier
 githor db init                    # crée la base SQLite et son schéma
 githor config show                # configuration effective et provenance du jeton
@@ -311,7 +338,9 @@ produit un fichier exploitable.
 │   ├── errors.py     # exceptions applicatives (messages destinés à l'utilisateur)
 │   ├── logging.py    # configuration du logging (Rich, stderr)
 │   ├── github/       # client HTTP, résolution du jeton, erreurs
-│   ├── models/       # repository, snapshot, activity, release, issue, finding
+│   ├── vcs/          # clone local : miroir superficiel, garde-fous
+│   ├── analysis/     # lignes, AST, complexité, imports, dépendances, tests
+│   ├── models/       # repository, snapshot, activity, release, issue, finding, code
 │   ├── collectors/   # repositories, langages, structure, activité, releases, issues
 │   ├── rules/        # catalogue de règles et moteur d'évaluation
 │   ├── storage/      # SQLAlchemy : schéma (tables.py) et session (database.py)
@@ -321,7 +350,7 @@ produit un fichier exploitable.
 │
 ├── tests/            # suite pytest — les appels GitHub sont toujours mockés
 ├── config/           # config.toml.example
-└── data/             # base SQLite, exports, cache (non versionnés)
+└── data/             # base SQLite, exports, miroirs des dépôts (non versionnés)
 ```
 
 ## Accès à l'API GitHub
@@ -584,6 +613,128 @@ répertoires et langages viennent du dernier snapshot ; les fenêtres de commits
 sont comptées depuis la **date du snapshot**, et non depuis l'instant de
 l'export, pour qu'un même snapshot produise toujours le même chiffre.
 
+## Analyse du code
+
+La V0.1 regardait un dépôt de l'extérieur : ce que GitHub en dit, et quels
+fichiers y sont présents. La V0.2 l'ouvre.
+
+### Le miroir local
+
+`githor audit` a besoin du code sur disque. `githor mirror` l'y met :
+
+```console
+$ githor mirror
+Githor — miroir local
+
+git version 2.47.3 · /home/patrick/Projets/Githor/data/repos
+
++ nouhailler/Architecturor (main · a711e78 · data/repos/nouhailler/Architecturor)
+✓ nouhailler/Astror (main · 3f21c04 · data/repos/nouhailler/Astror)
+…
+
+77 miroir(s) à jour : 2 cloné(s), 75 relu(s).
+```
+
+Le clone est **superficiel** — un seul commit, une seule branche : l'analyse
+porte sur l'état du code, jamais sur son passé. Trois garanties encadrent
+l'opération :
+
+- **rien n'est écrit vers GitHub.** Pas de `push`, pas de tag, pas de branche.
+  Le miroir sert à lire ;
+- **le jeton ne passe pas par l'URL de clone.** L'y coudre l'écrirait en clair
+  dans le `.git/config` du miroir, où il survivrait à l'exécution. Les dépôts
+  privés s'authentifient donc par le gestionnaire d'identifiants habituel de
+  `git` — `gh auth setup-git` suffit ;
+- **un répertoire que Githor n'a pas cloné n'est jamais touché.** Avant toute
+  mise à jour, l'`origin` du dépôt local est comparé à l'URL attendue ; en cas
+  de désaccord, Githor refuse d'agir plutôt que de lancer un `reset --hard` sur
+  le travail de quelqu'un.
+
+`githor mirror` et `githor audit` relisent la **base**, pas l'API : ils ne
+consomment aucun quota.
+
+### L'audit
+
+```console
+$ githor audit Githor
+Githor — audit du code
+
+nouhailler/Githor  main · 50637cd · audit 1
+
+Fichiers        80 analysé(s)
+Lignes          16651 (12425 code, 154 commentaire, 4072 vide)
+Part commentée  1.2 %
+Structure       768 fonction(s), 82 classe(s)
+Complexité      moyenne 3.26, maximum 20
+Tests           15 fichier(s) · 434 fonction(s) · pytest
+Dépendances     5 exécution, 4 optionnelle(s)
+```
+
+Suivent la répartition des langages, les fonctions les plus complexes avec leur
+fichier, les dépendances déclarées avec leur manifeste, et les imports tierce
+partie.
+
+### Ce que Githor sait faire, et ce qu'il ne prétend pas faire
+
+| Mesure | Langages |
+|---|---|
+| Lignes de code, de commentaire, vides | tous les langages reconnus (~60 extensions) |
+| Fonctions, classes, complexité, imports | **Python seulement** |
+| Dépendances déclarées | Python, npm, Cargo, Go |
+| Fichiers et fonctions de test | tous les langages pour les fichiers, Python pour les fonctions |
+
+L'analyse profonde s'arrête à Python, et c'est délibéré : structure, complexité
+et imports viennent de l'AST de l'interpréteur, si bien que ce qui est rapporté
+est ce que Python lui-même lit dans le fichier. Compter les fonctions d'un
+TypeScript à coups d'expressions régulières produirait un chiffre invérifiable —
+et la V0.1 a posé qu'une valeur absente vaut mieux qu'un chiffre faux.
+
+La **complexité** est celle de McCabe : un chemin d'exécution au départ, plus un
+par embranchement. Une fonction imbriquée n'est pas décomptée dans celle qui la
+contient — sa complexité lui est attribuée en propre, faute de quoi la même
+branche serait comptée deux fois.
+
+Une **docstring Python est du code**, non un commentaire : elle est évaluée,
+attachée à l'objet et lisible à l'exécution. La compter autrement flatterait la
+part commentée.
+
+### Ce qui est écarté, et pourquoi on le sait
+
+Rien n'est écarté en silence :
+
+- les répertoires d'artefacts — `node_modules`, `dist`, `.venv`, `__pycache__`,
+  `target`… — sont ignorés : leur contenu n'est pas du code écrit ici ;
+- les fichiers **binaires** sont reconnus à l'octet nul, comme le fait `git` ;
+- les fichiers dépassant `max_file_bytes` sont comptés sans être lus : au-delà
+  d'un mégaoctet, un fichier est un minifié ou une donnée embarquée, et
+  l'analyser fausserait toutes les moyennes ;
+- les fichiers Python qui ne se parsent pas sont **signalés**, avec la ligne
+  fautive.
+
+Les trois derniers cas sont affichés et enregistrés. Les liens symboliques ne
+sont jamais suivis : ils permettraient à un dépôt de faire sortir l'analyse de
+son propre miroir.
+
+### Dépendances déclarées
+
+Ce sont les dépendances **déclarées**, non celles installées ni celles
+importées. Les trois diffèrent, et c'est leur écart qui renseigne : un paquet
+déclaré que personne n'importe, un import que nul manifeste ne déclare.
+
+Chaque dépendance cite le manifeste qui l'a déclarée, comme un finding cite le
+chemin qui l'a motivé. Le rapprochement avec les imports est signalé comme une
+**piste**, jamais comme un manquement : un paquet s'installe souvent sous un nom
+différent de celui sous lequel il s'importe — `PyYAML` fournit `yaml`.
+
+### Historique
+
+Chaque `githor audit` **ajoute** un audit, comme un scan ajoute un snapshot. Deux
+analyses successives se comparent ; elles ne se remplacent pas. C'est ce qui
+permettra à la V0.3 de répondre à « ce projet s'est-il complexifié depuis six
+mois ? ».
+
+`githor audit --no-save` regarde sans écrire.
+
 ## Rapports
 
 ```bash
@@ -599,13 +750,13 @@ jeu de données** que l'export — il ne joint donc jamais GitHub — et décrit
 dernier snapshot enregistré, en le datant.
 
 Le document enchaîne ce que l'on demande à un projet qu'on redécouvre : ses
-mesures, ses langages, ce qui a été vérifié, ce qui manque, et depuis quand il
-est suivi.
+mesures, ses langages, son code, ce qui a été vérifié, ce qui manque, et depuis
+quand il est suivi.
 
 ```markdown
 # nouhailler/Architecturor
 
-*Rapport Githor 0.1.0 — généré le 2026-09-03 19:59 UTC, d'après le snapshot du 2026-09-03 08:31 UTC.*
+*Rapport Githor 0.2.0 — généré le 2026-09-05 12:27 UTC, d'après le snapshot du 2026-09-05 08:31 UTC.*
 
 <https://github.com/nouhailler/Architecturor> — public · branche `main`
 
@@ -616,6 +767,27 @@ est suivi.
 | Files | 76 |
 | Languages | 3 |
 | Commits (30 d) | 153 |
+
+## Code
+
+*D'après l'audit du 2026-09-05 12:27 UTC, commit `a711e78` sur `main`.*
+
+| Metric | Value |
+|---|---:|
+| Files analysed | 68 |
+| Lines of code | 4812 |
+| Comment ratio | 6.4 % |
+| Functions | 0 |
+| Average complexity | — |
+| Test files | 0 |
+| Dependencies | 23 |
+
+### Langages du code analysé
+
+| Language | Files | Code | Comment |
+|---|---:|---:|---:|
+| TypeScript | 51 | 4102 | 296 |
+| CSS | 12 | 604 | 24 |
 
 ## Documentation
 
@@ -635,6 +807,15 @@ est suivi.
 Les vérifications sont rendues depuis les **constats enregistrés**, jamais depuis
 le catalogue courant : un rapport montre ce qui avait été vérifié à la date du
 snapshot, et non ce que Githor saurait vérifier aujourd'hui.
+
+La section **Code** vient de l'audit, non du snapshot : ce sont deux mesures
+distinctes, prises par des chemins différents. L'une peut exister sans l'autre,
+et le rapport dit ce qui est enregistré sans jamais supposer la seconde.
+
+L'exemple ci-dessus est celui d'un projet TypeScript : ses lignes sont comptées,
+mais `Functions` vaut zéro et la complexité moyenne est absente. C'est le
+comportement attendu — l'analyse profonde s'arrête à Python, et un tiret vaut
+mieux qu'un chiffre inventé.
 
 Sans `--output`, le Markdown part **tel quel** sur `stdout` : il n'est ni habillé
 ni replié, afin qu'un tableau reste intact dans un terminal étroit comme dans un
@@ -667,8 +848,8 @@ Les tests n'utilisent **jamais** de token GitHub réel : le transport HTTP est m
 
 | Version | Contenu |
 |---|---|
-| **V0.1** | Inventaire, métadonnées, langages, structure, activité, issues, releases, métriques, findings, snapshots, exports, rapports |
-| V0.2 | Code Auditor : clone local, AST, LOC, complexité, imports, dépendances |
+| V0.1 | Inventaire, métadonnées, langages, structure, activité, issues, releases, métriques, findings, snapshots, exports, rapports |
+| **V0.2** | Code Auditor : clone local, AST, LOC, complexité, imports, dépendances, tests |
 | V0.3 | Project Intelligence : comparaison inter-projets, scores, historique |
 | V0.4 | AI Advisor : analyse via Ollama, recommandations priorisées |
 

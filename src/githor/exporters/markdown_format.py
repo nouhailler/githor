@@ -105,6 +105,8 @@ def _repository_section(repository: RepositoryExport) -> list[str]:
 
     if snapshot is None:
         lines += ["Aucun snapshot enregistré.", ""]
+        # L'analyse locale ne dépend pas du scan : elle a sa place même ici.
+        lines += _code(repository)
         return lines
 
     lines += [
@@ -136,8 +138,39 @@ def _repository_section(repository: RepositoryExport) -> list[str]:
         )
         lines.append("")
 
+    lines += _code(repository)
     lines += _open_findings(repository)
     return lines
+
+
+def _code(repository: RepositoryExport) -> list[str]:
+    """Résumé d'une ligne de l'analyse locale, si elle a eu lieu.
+
+    L'export décrit un parc : une ligne suffit par dépôt. Le détail appartient
+    au rapport individuel, qui n'en décrit qu'un.
+    """
+    code = repository.code
+    if code is None:
+        return []
+
+    parts = [
+        f"{code.lines_code} lignes de code",
+        f"{code.files_analysed} fichier(s)",
+    ]
+    if code.primary_language:
+        parts.append(escape_cell(code.primary_language))
+    if code.functions:
+        parts.append(f"{code.functions} fonction(s)")
+    if code.average_complexity is not None:
+        parts.append(f"complexité {code.average_complexity} (max {code.max_complexity})")
+    parts.append(f"{code.test_files} fichier(s) de test" if code.test_files else "aucun test")
+
+    return [
+        f"**Code** — {' · '.join(parts)}. "
+        f"*Audit du {format_moment(code.analysed_at)}, commit "
+        f"`{escape_cell(code.commit[:7])}`.*",
+        "",
+    ]
 
 
 def _open_findings(repository: RepositoryExport) -> list[str]:

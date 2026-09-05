@@ -19,13 +19,14 @@ service tiers ni compte à créer.
 ## Ce que Githor est, et n'est pas
 
 **Est** : un inventaire local, en lecture seule, qui interroge l'API GitHub,
-normalise ce qu'elle renvoie, le range dans SQLite et en tire des constats
-déterministes.
+normalise ce qu'elle renvoie, le range dans SQLite, lit le code sur un clone
+local et en tire des constats déterministes.
 
 **N'est pas** :
 
 - un outil qui écrit sur GitHub. Aucune écriture, jamais : ni issue, ni branche,
-  ni fichier. La V0.1 n'utilise que des routes de lecture ;
+  ni fichier. Les routes employées sont toutes en lecture, et le clone local ne
+  connaît ni `push`, ni tag, ni création de branche ;
 - un service. Pas de serveur, pas de daemon, pas de compte ;
 - un outil d'IA. La V0.1 est **entièrement déterministe**. L'IA arrive en V0.4,
   et seulement au-dessus de données déjà collectées et vérifiables.
@@ -128,6 +129,59 @@ toujours produire le même chiffre.
 Le fichier produit est horodaté. Un export est une photographie, au même titre
 qu'un snapshot ; deux exports successifs doivent pouvoir être comparés.
 
+### L'analyse locale est une seconde source, pas une extension de la première
+
+`github/` lit une API ; `vcs/` et `analysis/` lisent des fichiers sur disque.
+Les deux chemins ignorent tout l'un de l'autre et alimentent les mêmes modèles.
+C'est ce qui a permis d'ajouter la V0.2 sans rien réécrire de la V0.1 — et ce
+qui permettra à la V0.4 de commenter les deux sans les confondre.
+
+Conséquence assumée : un dépôt peut avoir un snapshot sans audit, ou l'inverse.
+Un rapport dit ce qui existe, sans jamais supposer l'autre.
+
+### L'audit pend du repository, non du snapshot
+
+Un audit se lit sur un clone local et n'exige aucun appel à GitHub. Le rattacher
+au snapshot obligerait à scanner avant d'analyser, alors que rien ne le demande.
+
+### Un clone est une copie jetable, jamais un dépôt de travail
+
+Le miroir est ramené à l'état publié à chaque passage : une analyse doit décrire
+le dépôt distant, non les résidus de la précédente. C'est aussi pourquoi Githor
+vérifie l'`origin` avant d'agir et refuse de toucher un répertoire qu'il n'a pas
+cloné — `reset --hard` détruit du travail.
+
+Et c'est pourquoi le jeton ne passe pas par l'URL de clone : l'y coudre
+l'écrirait en clair dans le `.git/config` du miroir, où il survivrait à
+l'exécution. L'authentification des dépôts privés revient à `git`.
+
+### L'analyse profonde s'arrête à Python
+
+Les lignes sont comptées pour tout langage reconnu ; la structure, la complexité
+et les imports ne le sont que pour Python, où ils viennent de l'AST de
+l'interpréteur. Une heuristique par expressions régulières sur du TypeScript
+produirait un chiffre qu'on ne saurait pas justifier.
+
+Deux corollaires, notés ici parce qu'ils surprennent :
+
+- une **docstring est du code**, non un commentaire. Elle est évaluée, attachée
+  à l'objet et lisible à l'exécution ; la compter autrement flatterait la part
+  commentée ;
+- la complexité d'une **fonction imbriquée** lui est attribuée en propre et
+  n'entre pas dans celle qui la contient, faute de quoi la même branche serait
+  comptée deux fois.
+
+### Déclaré, installé, importé sont trois choses
+
+Githor lit ce que les manifestes **déclarent**. Il ne sait rien de ce qui est
+installé, et il relève à part ce qui est **importé**. Confondre les trois
+donnerait un chiffre commode et faux ; les garder distinctes rend leurs écarts
+lisibles.
+
+Le rapprochement entre imports et déclarations est donc une piste, jamais un
+constat : un paquet s'installe souvent sous un autre nom que celui sous lequel
+il s'importe. Aucune règle n'en tire de finding.
+
 ### Un rapport dit d'un dépôt ce que l'export dit de tous
 
 `githor report` ne recalcule rien : il construit le même `RepositoryExport` que
@@ -148,8 +202,12 @@ doit jamais produire autre chose que le fichier attendu.
 ## État d'avancement
 
 La **0.1.0** est publiée : les treize étapes du plan sont franchies et le cahier
-des charges n'a plus de manque connu. Le détail est dans le
-[CHANGELOG](CHANGELOG.md) ; la suite est la V0.2, décrite plus bas.
+des charges n'a plus de manque connu.
+
+La **V0.2 — Code Auditor** est livrée (étapes 14 à 18) : clone local, décompte
+de lignes, AST, complexité, imports, dépendances déclarées et détection des
+tests, le tout persisté et rendu dans les rapports comme dans les exports. Le
+détail est dans le [CHANGELOG](CHANGELOG.md).
 
 ## Conventions
 
@@ -174,19 +232,30 @@ C'est pourquoi la table `findings` n'a pas de colonne `evidence` : le chemin qui
 motive un constat est repris dans son message. Si une colonne devient
 indispensable, il faudra d'abord introduire les migrations.
 
+**La V0.2 a été conçue sous cette contrainte** : elle n'ajoute que des tables
+neuves — `code_audits` et les cinq qui en pendent — et ne modifie aucune colonne
+existante. Les bases créées par la 0.1.0 s'ouvrent donc sans rien perdre. Ce
+n'est pas une coïncidence mais une limite acceptée : elle a écarté d'emblée
+toute idée d'enrichir `repository_snapshots` avec des mesures de code.
+
+La contrainte tiendra tant qu'une évolution ne réclamera pas de colonne. La
+V0.3, qui voudra sans doute stocker des scores comparables, sera probablement
+celle qui obligera à introduire les migrations pour de bon.
+
 ## Trajectoire
 
-| Version | Contenu | Ce que la V0.1 doit préparer |
+| Version | Contenu | État |
 |---|---|---|
-| **V0.1** | Inventaire, snapshots, findings, exports, rapports | — |
-| V0.2 | Code Auditor : clone local, AST, LOC, complexité, dépendances | des modèles indépendants de la forme des réponses GitHub |
-| V0.3 | Project Intelligence : comparaison, scores, historique | assez d'historique pour comparer deux dates |
-| V0.4 | AI Advisor : analyse via Ollama, recommandations priorisées | des findings traçables, que l'IA commente sans les inventer |
+| V0.1 | Inventaire, snapshots, findings, exports, rapports | livrée (0.1.0) |
+| **V0.2** | Code Auditor : clone local, AST, LOC, complexité, imports, dépendances, tests | livrée |
+| V0.3 | Project Intelligence : comparaison, scores, historique | à faire — réclamera probablement les migrations |
+| V0.4 | AI Advisor : analyse via Ollama, recommandations priorisées | à faire — s'appuiera sur des findings et des audits traçables |
 
 Les couches sont séparées pour cela : `github/` ne connaît ni la base ni la CLI,
 les `collectors/` font le pont vers les modèles normalisés, les `rules/` ne
-connaissent ni GitHub ni SQLite. Une analyse locale du code (V0.2) s'ajoutera
-comme une nouvelle source alimentant les mêmes modèles, sans réécrire l'existant.
+connaissent ni GitHub ni SQLite. La V0.2 a mis ce pari à l'épreuve : `vcs/` et
+`analysis/` se sont ajoutés comme une source de plus, alimentant les mêmes
+modèles, sans qu'une ligne de la V0.1 ait eu à être réécrite.
 
 ## Spécification d'origine
 

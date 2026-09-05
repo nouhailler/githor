@@ -5,8 +5,98 @@ Toutes les évolutions notables de Githor sont consignées ici.
 Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), et le
 projet respecte le [versionnement sémantique](https://semver.org/lang/fr/).
 
-Les étapes numérotées renvoient au plan de développement de la V0.1 : les
-treize sont franchies.
+Les étapes numérotées renvoient au plan de développement : les treize de la V0.1
+sont franchies, et les étapes 14 à 18 constituent la V0.2.
+
+## [0.2.0] — 2026-09-05
+
+**Code Auditor.** La 0.1.0 regardait un dépôt de l'extérieur — ce que GitHub en
+dit, quels fichiers y sont présents. La 0.2.0 l'ouvre : elle clone le code
+localement et le lit.
+
+### Ajouté
+
+- **Miroir local des dépôts** *(étape 14)*.
+  - `githor mirror` clone ou met à jour la copie locale des dépôts enregistrés,
+    superficiellement et sur la seule branche par défaut : l'analyse porte sur
+    l'état du code, jamais sur son passé ;
+  - la commande relit la **base**, pas l'API : aucun quota n'est consommé ;
+  - **le jeton ne passe pas par l'URL de clone.** L'y coudre l'écrirait en clair
+    dans le `.git/config` du miroir, où il survivrait à l'exécution. Les dépôts
+    privés s'authentifient par le gestionnaire d'identifiants habituel de `git`,
+    et `GIT_TERMINAL_PROMPT=0` garantit qu'un dépôt inaccessible échoue tout de
+    suite au lieu d'attendre une saisie ;
+  - **un répertoire que Githor n'a pas cloné n'est jamais touché** : l'`origin`
+    est comparé à l'URL attendue avant toute mise à jour, et un nom de dépôt qui
+    ne peut pas devenir un chemin sûr est refusé. `reset --hard` détruit du
+    travail ;
+  - le miroir est ramené à l'état publié à chaque passage : une analyse décrit
+    le dépôt distant, non les résidus de la précédente ;
+  - `--offline` lit les miroirs déjà présents sans interroger l'origine.
+- **Analyse du code : lignes, structure, complexité, imports** *(étape 15)*.
+  - `githor audit` compte les lignes — code, commentaire, vide — de tous les
+    langages reconnus, une soixantaine d'extensions ;
+  - structure, complexité cyclomatique et imports viennent de l'**AST de
+    l'interpréteur** et ne sont établis que pour Python : compter les fonctions
+    d'un TypeScript à l'expression régulière produirait un chiffre
+    invérifiable, et une valeur absente vaut mieux qu'un chiffre faux ;
+  - une **docstring est du code**, non un commentaire : elle est évaluée,
+    attachée à l'objet et lisible à l'exécution ;
+  - la complexité d'une **fonction imbriquée** lui est attribuée en propre et
+    n'entre pas dans celle qui la contient, faute de quoi la même branche serait
+    comptée deux fois ;
+  - un import est **local** quand sa racine est un paquet du dépôt, disposition
+    `src/` comprise — sans quoi tout projet moderne verrait ses propres modules
+    comptés comme tierce partie ;
+  - rien n'est écarté en silence : répertoires d'artefacts, fichiers binaires,
+    fichiers trop gros et modules non parsables sont comptés et rapportés. Les
+    liens symboliques ne sont jamais suivis.
+- **Dépendances déclarées et détection des tests** *(étape 16)*.
+  - lecture des manifestes : `pyproject.toml` (PEP 621, PEP 735, Poetry),
+    `requirements*.txt`, `setup.cfg`, `package.json`, `Cargo.toml`, `go.mod` ;
+  - ce sont les dépendances **déclarées**, non celles installées ni celles
+    importées : garder les trois distinctes rend leurs écarts lisibles. Chaque
+    dépendance cite le manifeste qui l'a déclarée ;
+  - le rapprochement entre imports tiers et déclarations est une **piste**,
+    jamais un manquement — un paquet s'installe souvent sous un autre nom que
+    celui sous lequel il s'importe. Aucune règle n'en tire de constat ;
+  - détection **structurelle** des tests : conventions de nommage pour les
+    fichiers, quel que soit le langage, et AST pour compter les fonctions
+    Python. Rien n'est exécuté — Githor ne lance jamais les tests d'un dépôt
+    qu'il analyse ;
+  - les cadres de test sont reconnus par import *et* par dépendance déclarée :
+    l'import prouve un usage, la dépendance couvre ceux qui s'invoquent par
+    leur runner sans jamais s'importer.
+- **Persistance des audits et section « Code » des rapports** *(étape 17)*.
+  - chaque `githor audit` **ajoute** un audit, comme un scan ajoute un
+    snapshot : deux analyses successives se comparent, elles ne se remplacent
+    pas ;
+  - **six tables neuves, aucune colonne ajoutée à une table existante.** C'est
+    la seule évolution que `create_all` sache appliquer à une base déjà créée,
+    donc la seule possible tant qu'aucun outil de migration n'est en place :
+    les bases de la 0.1.0 s'ouvrent sans rien perdre ;
+  - l'audit pend du **repository** et non du snapshot : il se lit sur un clone
+    local, et l'y rattacher obligerait à scanner avant d'analyser. Un rapport
+    rend donc la section Code même pour un dépôt jamais scanné ;
+  - seuls des **faits** sont écrits — un module, une fonction, une classe, un
+    import, une dépendance. Toutes les métriques se recalculent à la lecture,
+    hormis les fichiers binaires et trop gros, qui n'ont pas de ligne à eux et
+    ne pourraient pas être recomptés ;
+  - `--no-save` regarde sans écrire.
+- **L'analyse locale dans les exports** *(étape 18)*.
+  - le JSON porte un objet `code` complet, `null` pour un dépôt jamais analysé ;
+  - le CSV gagne treize colonnes `code_*`, **vides** et non à zéro quand
+    l'analyse n'a pas eu lieu : un zéro laisserait croire à une mesure faite ;
+  - l'export Markdown résume l'analyse en une ligne par dépôt, le détail
+    restant au rapport individuel ;
+  - export et rapport tirent leurs chiffres de la même fonction : ils ne
+    peuvent pas donner deux valeurs différentes du même dépôt.
+
+### Corrigé
+
+- la fixture de tests qui neutralisait `gh` remplaçait `subprocess.run` tout
+  entier, ce qui coupait aussi `git`. Elle ne neutralise plus que `gh` ; la
+  suite ne joint pas plus le réseau qu'avant.
 
 ## [0.1.0] — 2026-09-05
 

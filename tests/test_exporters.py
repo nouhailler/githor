@@ -17,15 +17,24 @@ from githor.errors import StorageError
 from githor.exporters import ExportFormat, build_dataset, export_filename, render, write_export
 from githor.exporters.csv_format import COLUMNS
 from githor.models.activity import Commit
+from githor.models.code import (
+    CodeAudit,
+    Dependency,
+    FunctionAnalysis,
+    LineCounts,
+    ModuleAnalysis,
+)
 from githor.models.finding import Finding, Severity, Status
 from githor.models.issue import Issue
 from githor.models.release import Release
 from githor.models.repository import Repository
 from githor.models.snapshot import Language, RepositoryFile
+from githor.storage.code import save_audit
 from githor.storage.database import Database
 from githor.storage.findings import save_findings
 from githor.storage.repositories import (
     add_snapshot,
+    find_repository_by_name,
     save_commits,
     save_files,
     save_issues,
@@ -309,3 +318,79 @@ def test_an_unwritable_directory_is_reported_clearly(populated: Database, tmp_pa
 
     with pytest.raises(StorageError, match="Export impossible"):
         write_export(dataset_of(populated), ExportFormat.JSON, blocked / "exports")
+
+
+# ── Analyse locale dans les exports ──────────────────────────────────────────
+
+
+def with_audit(database: Database, name: str = "Architecturor") -> Database:
+    """Ajoute un audit de code au dépôt désigné."""
+    with database.session() as session:
+        row = find_repository_by_name(session, name)
+        assert row is not None
+        save_audit(
+            session,
+            row.id,
+            CodeAudit(
+                analysed_at=NOW,
+                commit="0123456789abcdef",
+                branch="main",
+                files_seen=2,
+                files_analysed=1,
+                modules=(
+                    ModuleAnalysis(
+                        path="src/app.py",
+                        language="Python",
+                        lines=LineCounts(total=10, code=7, comment=2, blank=1),
+                        functions=(FunctionAnalysis(name="traiter", line=1, complexity=3),),
+                    ),
+                ),
+                dependencies=(Dependency(name="httpx", ecosystem="PyPI", source="pyproject.toml"),),
+            ),
+        )
+    return database
+
+
+def test_json_carries_the_code_analysis(populated: Database) -> None:
+    payload = json.loads(render(dataset_of(with_audit(populated)), ExportFormat.JSON))
+    code = payload["repositories"][0]["code"]
+
+    assert code["lines_code"] == 7
+    assert code["functions"] == 1
+    assert code["primary_language"] == "Python"
+    assert code["dependencies"] == 1
+
+
+def test_json_says_null_when_a_repository_was_never_analysed(populated: Database) -> None:
+    payload = json.loads(render(dataset_of(populated), ExportFormat.JSON))
+
+    assert payload["repositories"][0]["code"] is None
+
+
+def test_csv_leaves_the_code_columns_empty_without_an_audit(populated: Database) -> None:
+    """Une case vide, non un zéro : zéro laisserait croire à une mesure faite."""
+    rows = list(csv.DictReader(io.StringIO(render(dataset_of(populated), ExportFormat.CSV))))
+
+    assert rows[0]["code_lines"] == ""
+    assert rows[0]["code_functions"] == ""
+
+
+def test_csv_carries_the_code_analysis(populated: Database) -> None:
+    rows = list(
+        csv.DictReader(io.StringIO(render(dataset_of(with_audit(populated)), ExportFormat.CSV)))
+    )
+
+    assert rows[0]["code_lines"] == "7"
+    assert rows[0]["code_commit"] == "0123456"
+    assert rows[0]["code_language"] == "Python"
+
+
+def test_markdown_summarises_the_code_in_one_line(populated: Database) -> None:
+    document = render(dataset_of(with_audit(populated)), ExportFormat.MARKDOWN)
+
+    assert "**Code** — 7 lignes de code" in document
+    assert "commit `0123456`" in document
+
+
+def test_markdown_says_nothing_about_code_without_an_audit(populated: Database) -> None:
+    assert "**Code**" not in render(dataset_of(populated), ExportFormat.MARKDOWN)

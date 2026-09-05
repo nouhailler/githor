@@ -16,6 +16,8 @@ from sqlalchemy.orm import Session
 
 from githor import __version__
 from githor.logging import get_logger
+from githor.models.code import DependencyScope
+from githor.storage.code import audit_metrics, latest_audit
 from githor.storage.findings import latest_findings
 from githor.storage.repositories import latest_snapshot, list_stored_repositories
 from githor.storage.tables import (
@@ -113,6 +115,52 @@ class Metrics(BaseModel):
     findings_low: int = 0
 
 
+class CodeExport(BaseModel):
+    """Ce que la dernière analyse locale a lu du code d'un repository.
+
+    Volontairement plat : l'export décrit un parc, et doit rester lisible dans
+    un tableur. Le détail — chaque fonction, chaque dépendance — appartient au
+    rapport individuel, qui décrit un seul dépôt.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    analysed_at: datetime
+    commit: str
+    branch: str
+
+    files_analysed: int = 0
+    files_binary: int = 0
+    files_too_large: int = 0
+    parse_errors: int = 0
+
+    lines_total: int = 0
+    lines_code: int = 0
+    lines_comment: int = 0
+    lines_blank: int = 0
+    comment_ratio: float | None = None
+
+    primary_language: str | None = None
+    """Langage portant le plus de lignes de code sur disque.
+
+    Peut différer du ``primary_language`` du snapshot, que GitHub calcule sur
+    l'ensemble du dépôt : l'écart entre les deux est précisément instructif.
+    """
+
+    functions: int = 0
+    classes: int = 0
+    average_complexity: float | None = None
+    max_complexity: int = 0
+
+    test_files: int = 0
+    test_functions: int = 0
+    test_frameworks: tuple[str, ...] = ()
+
+    dependencies: int = 0
+    dependencies_runtime: int = 0
+    dependencies_development: int = 0
+
+
 class RepositoryExport(BaseModel):
     """Un repository, son dernier état mesuré et ce qui s'y rattache."""
 
@@ -137,6 +185,9 @@ class RepositoryExport(BaseModel):
     languages: tuple[LanguageExport, ...] = ()
     findings: tuple[FindingExport, ...] = ()
     releases: tuple[ReleaseExport, ...] = ()
+
+    code: CodeExport | None = None
+    """Dernière analyse locale, ``None`` si le dépôt n'a jamais été analysé."""
 
     @property
     def open_findings(self) -> tuple[FindingExport, ...]:
@@ -218,6 +269,46 @@ def build_repository_export(session: Session, row: RepositoryRow) -> RepositoryE
         languages=languages,
         findings=findings,
         releases=releases,
+        code=_code(session, row.id),
+    )
+
+
+def _code(session: Session, repository_id: int) -> CodeExport | None:
+    """Résume la dernière analyse locale, si le dépôt en a une.
+
+    Les chiffres viennent de :func:`githor.storage.code.audit_metrics`, qui les
+    recalcule depuis les tables : export et rapport ne peuvent donc pas donner
+    deux valeurs différentes du même dépôt.
+    """
+    audit = latest_audit(session, repository_id)
+    if audit is None:
+        return None
+
+    metrics = audit_metrics(session, audit, complex_limit=0)
+    return CodeExport(
+        analysed_at=metrics.analysed_at,
+        commit=metrics.commit,
+        branch=metrics.branch,
+        files_analysed=metrics.files_analysed,
+        files_binary=metrics.files_binary,
+        files_too_large=metrics.files_too_large,
+        parse_errors=metrics.parse_errors,
+        lines_total=metrics.lines.total,
+        lines_code=metrics.lines.code,
+        lines_comment=metrics.lines.comment,
+        lines_blank=metrics.lines.blank,
+        comment_ratio=metrics.lines.comment_ratio,
+        primary_language=metrics.languages[0].language if metrics.languages else None,
+        functions=metrics.function_count,
+        classes=metrics.class_count,
+        average_complexity=metrics.average_complexity,
+        max_complexity=metrics.max_complexity,
+        test_files=metrics.tests.files,
+        test_functions=metrics.tests.functions,
+        test_frameworks=metrics.tests.frameworks,
+        dependencies=len(metrics.dependencies),
+        dependencies_runtime=len(metrics.dependencies_in_scope(DependencyScope.RUNTIME)),
+        dependencies_development=len(metrics.dependencies_in_scope(DependencyScope.DEVELOPMENT)),
     )
 
 

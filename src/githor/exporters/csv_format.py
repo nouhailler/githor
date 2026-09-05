@@ -39,9 +39,26 @@ COLUMNS: tuple[str, ...] = (
     "findings_high",
     "findings_medium",
     "findings_low",
+    "code_analysed",
+    "code_commit",
+    "code_files",
+    "code_lines",
+    "code_comment_ratio",
+    "code_language",
+    "code_functions",
+    "code_classes",
+    "code_complexity_avg",
+    "code_complexity_max",
+    "code_test_files",
+    "code_test_functions",
+    "code_dependencies",
     "url",
 )
-"""Colonnes du CSV, dans l'ordre : identité, mesure, activité, constats."""
+"""Colonnes du CSV, dans l'ordre : identité, mesure, activité, constats, code.
+
+Les colonnes ``code_*`` sont vides pour un dépôt jamais analysé localement — une
+case vide et non un zéro, qui laisserait croire à une mesure faite.
+"""
 
 
 def render_csv(dataset: Dataset) -> str:
@@ -86,7 +103,31 @@ def _row(repository: RepositoryExport) -> list[str]:
         str(metrics.findings_high),
         str(metrics.findings_medium),
         str(metrics.findings_low),
+        *_code_columns(repository),
         repository.url,
+    ]
+
+
+def _code_columns(repository: RepositoryExport) -> list[str]:
+    """Colonnes issues de l'analyse locale, vides si elle n'a pas eu lieu."""
+    code = repository.code
+    if code is None:
+        return [""] * 13
+
+    return [
+        isoformat(code.analysed_at),
+        code.commit[:7],
+        str(code.files_analysed),
+        str(code.lines_code),
+        "" if code.comment_ratio is None else str(code.comment_ratio),
+        code.primary_language or "",
+        str(code.functions),
+        str(code.classes),
+        "" if code.average_complexity is None else str(code.average_complexity),
+        str(code.max_complexity),
+        str(code.test_files),
+        str(code.test_functions),
+        str(code.dependencies),
     ]
 
 

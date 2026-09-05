@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 # ─────────────────────────────────────────────────────────────────────────────
 [project]
 name = "githor"
-version = "0.1.0"
+version = "0.2.0"
 description = "Githor — inventaire, métriques et audit local de repositories GitHub (CLI, lecture seule)"
 readme = "README.md"
 license = { text = "MIT" }
