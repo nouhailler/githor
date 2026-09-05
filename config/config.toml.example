@@ -32,6 +32,14 @@ include_archived = false
 # Profondeur de l'historique de commits analysé, en jours (1 à 3650).
 commit_history_days = 90
 
+# Durée pendant laquelle une mesure déjà prise dispense d'en reprendre une,
+# en heures (0 à 8760). Un dépôt mesuré il y a moins que cette durée est ignoré
+# par « githor scan » : ni appel à GitHub, ni nouveau snapshot.
+# La valeur 0 ne dispense de rien — chaque scan mesure tout.
+# La relever économise le quota lors de scans rapprochés ; « --freshness »
+# remplace ponctuellement cette valeur, et « --freshness 0 » force un scan complet.
+snapshot_freshness_hours = 0
+
 [storage]
 database = "data/githor.db"
 

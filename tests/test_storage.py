@@ -18,6 +18,7 @@ from githor.storage.database import Database
 from githor.storage.repositories import (
     add_snapshot,
     count_snapshots,
+    last_collected_at,
     latest_snapshot,
     save_commits,
     save_files,
@@ -414,6 +415,61 @@ def test_latest_snapshot_is_none_without_history(database: Database) -> None:
         row, _ = upsert_repository(session, normalised())
         assert latest_snapshot(session, row.id) is None
         assert count_snapshots(session, row.id) == 0
+
+
+# ── Fraîcheur des mesures ────────────────────────────────────────────────────
+
+
+def test_last_collected_at_returns_the_most_recent_measure(database: Database) -> None:
+    repository_id = add_repository(database, github_id=42)
+    for day in (1, 30, 15):
+        insert_snapshot(database, repository_id, collected_at=datetime(2026, 8, day, tzinfo=UTC))
+
+    with database.session() as session:
+        assert last_collected_at(session, [42]) == {42: datetime(2026, 8, 30, tzinfo=UTC)}
+
+
+def test_last_collected_at_keeps_the_dates_in_utc(database: Database) -> None:
+    """Une date relue naïve fausserait toute comparaison de fraîcheur."""
+    repository_id = add_repository(database, github_id=42)
+    insert_snapshot(database, repository_id, collected_at=datetime(2026, 8, 30, 12, tzinfo=UTC))
+
+    with database.session() as session:
+        moment = last_collected_at(session, [42])[42]
+
+    assert moment.tzinfo is not None
+    assert moment.utcoffset() == timedelta(0)
+
+
+def test_last_collected_at_separates_repositories(database: Database) -> None:
+    first = add_repository(database, github_id=1)
+    second = add_repository(database, github_id=2, full_name="nouhailler/Astror", name="Astror")
+    insert_snapshot(database, first, collected_at=datetime(2026, 8, 1, tzinfo=UTC))
+    insert_snapshot(database, second, collected_at=datetime(2026, 8, 20, tzinfo=UTC))
+
+    with database.session() as session:
+        assert last_collected_at(session, [1, 2]) == {
+            1: datetime(2026, 8, 1, tzinfo=UTC),
+            2: datetime(2026, 8, 20, tzinfo=UTC),
+        }
+
+
+def test_a_repository_without_snapshot_is_absent(database: Database) -> None:
+    """Absent, et non « jamais mesuré » : l'appelant décide de ce que cela veut dire."""
+    add_repository(database, github_id=42)
+
+    with database.session() as session:
+        assert last_collected_at(session, [42]) == {}
+
+
+def test_an_unknown_repository_is_absent(database: Database) -> None:
+    with database.session() as session:
+        assert last_collected_at(session, [999]) == {}
+
+
+def test_last_collected_at_of_nothing_queries_nothing(database: Database) -> None:
+    with database.session() as session:
+        assert last_collected_at(session, []) == {}
 
 
 # ── Langages, arborescence et commits ────────────────────────────────────────

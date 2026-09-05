@@ -22,6 +22,7 @@ api_url = "https://github.example.com/api/v3"
 include_forks = true
 include_archived = true
 commit_history_days = 30
+snapshot_freshness_hours = 12
 
 [storage]
 database = "db/custom.db"
@@ -49,6 +50,7 @@ def test_defaults_apply_without_any_file(tmp_path: Path) -> None:
     assert config.scan.include_forks is False
     assert config.scan.include_archived is False
     assert config.scan.commit_history_days == 90
+    assert config.scan.snapshot_freshness_hours == 0
     assert config.storage.database == tmp_path.resolve() / "data" / "githor.db"
     assert config.export.directory == tmp_path.resolve() / "data" / "exports"
 
@@ -131,6 +133,21 @@ def test_commit_history_days_is_bounded(tmp_path: Path, days: int) -> None:
         load_config(path, base_dir=tmp_path)
 
 
+def test_snapshot_freshness_is_read(tmp_path: Path) -> None:
+    path = write(tmp_path / "frais.toml", "[scan]\nsnapshot_freshness_hours = 12\n")
+
+    assert load_config(path, base_dir=tmp_path).scan.snapshot_freshness_hours == 12
+
+
+@pytest.mark.parametrize("hours", [-1, 10_000])
+def test_snapshot_freshness_is_bounded(tmp_path: Path, hours: int) -> None:
+    """Zéro est légitime — il désactive la dispense ; une valeur négative ne l'est pas."""
+    path = write(tmp_path / "frais.toml", f"[scan]\nsnapshot_freshness_hours = {hours}\n")
+
+    with pytest.raises(ConfigError, match="snapshot_freshness_hours"):
+        load_config(path, base_dir=tmp_path)
+
+
 def test_config_errors_are_githor_errors(tmp_path: Path) -> None:
     with pytest.raises(GithorError):
         load_config(tmp_path / "absent.toml", base_dir=tmp_path)
@@ -205,6 +222,7 @@ def test_example_file_matches_the_model() -> None:
 
     assert isinstance(config, Config)
     assert config.scan.commit_history_days == 90
+    assert config.scan.snapshot_freshness_hours == 0
 
 
 def test_gh_cli_fallback_is_enabled_by_default(tmp_path: Path) -> None:

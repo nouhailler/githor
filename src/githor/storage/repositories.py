@@ -7,6 +7,7 @@ Deux gestes distincts, et c'est le cœur du modèle :
 """
 
 from collections.abc import Sequence
+from datetime import datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -145,6 +146,36 @@ def first_snapshot(session: Session, repository_id: int) -> RepositorySnapshotRo
         .order_by(RepositorySnapshotRow.collected_at)
         .limit(1)
     )
+
+
+def last_collected_at(session: Session, github_ids: Sequence[int]) -> dict[int, datetime]:
+    """Date du dernier snapshot de chaque repository déjà connu.
+
+    Répond, en une seule requête et **avant** tout appel à GitHub, à la question
+    « une mesure récente existe-t-elle déjà ? ». La clé est l'identifiant GitHub,
+    seule identité qui survit à un renommage : c'est celle que le scan a en main
+    au moment de décider.
+
+    Args:
+        session: session ouverte.
+        github_ids: identifiants GitHub des repositories à interroger.
+
+    Returns:
+        Un dictionnaire identifiant GitHub -> date du snapshot le plus récent.
+        Les repositories inconnus, ou connus mais sans aucun snapshot, en sont
+        simplement absents.
+    """
+    if not github_ids:
+        return {}
+
+    rows = session.execute(
+        select(RepositoryRow.github_id, func.max(RepositorySnapshotRow.collected_at))
+        .join(RepositorySnapshotRow, RepositorySnapshotRow.repository_id == RepositoryRow.id)
+        .where(RepositoryRow.github_id.in_(github_ids))
+        .group_by(RepositoryRow.github_id)
+    ).all()
+
+    return {github_id: moment for github_id, moment in rows if moment is not None}
 
 
 def count_snapshots(session: Session, repository_id: int) -> int:

@@ -5,7 +5,7 @@ en UTC : GitHub renvoie de l'UTC, et les comparaisons d'historique doivent
 rester indépendantes du fuseau de la machine.
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 
 def utc_now() -> datetime:
@@ -56,3 +56,29 @@ def isoformat(moment: datetime | None) -> str:
     if moment is None:
         return ""
     return moment.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+def format_age(delta: timedelta) -> str:
+    """Exprime une durée écoulée de façon compacte : ``12 min``, ``3 h``, ``5 j``.
+
+    Sert à dire à l'utilisateur *pourquoi* une mesure est jugée encore fraîche.
+    Une seule unité suffit : il s'agit d'expliquer une décision, pas de mesurer.
+    Une durée négative — une date en avance, donc une horloge qui dérive — est
+    ramenée à zéro plutôt que rendue telle quelle.
+
+    Args:
+        delta: durée écoulée depuis la mesure.
+    """
+    seconds = max(0, int(delta.total_seconds()))
+    if seconds < 60:
+        return "moins d'une minute"
+
+    minutes = seconds // 60
+    if minutes < 60:
+        return f"{minutes} min"
+
+    hours = minutes // 60
+    if hours < 24:
+        return f"{hours} h"
+
+    return f"{hours // 24} j"

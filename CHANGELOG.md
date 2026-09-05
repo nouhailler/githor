@@ -5,16 +5,35 @@ Toutes les évolutions notables de Githor sont consignées ici.
 Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), et le
 projet respecte le [versionnement sémantique](https://semver.org/lang/fr/).
 
-Les étapes numérotées renvoient au plan de développement de la V0.1 : douze des
-treize étapes sont franchies.
+Les étapes numérotées renvoient au plan de développement de la V0.1 : les
+treize sont franchies.
 
 ## [Non publié]
 
-Ce qui reste avant de figer la **0.1.0** : la complétion de la suite de tests
-(étape 13).
+La V0.1 remplit ses critères d'acceptation et le cahier des charges n'a plus de
+manque connu. Reste à figer la **0.1.0**.
 
 ### Ajouté
 
+- **Fraîcheur des snapshots** *(§27 du cahier des charges)*.
+  - avant d'interroger GitHub, le scan relit **en une requête** la date du
+    dernier snapshot de chaque dépôt et écarte ceux mesurés depuis moins de
+    `scan.snapshot_freshness_hours`. Un dépôt ignoré ne coûte rien : ni appel,
+    ni snapshot, ni écriture. Seul le listage des dépôts subsiste ;
+  - le cache logique, c'est **la base elle-même** : la table des snapshots sait
+    déjà quand chaque mesure a eu lieu, rien n'est à faire vieillir en parallèle ;
+  - la valeur par défaut, `0`, ne dispense de rien — un scan mesure tout, comme
+    auparavant. Le quota est un coût, la perte d'historique une régression : le
+    comportement par défaut protège ce qui ne se rattrape pas ;
+  - `githor scan --freshness HEURES` **remplace** la valeur configurée au lieu de
+    s'y ajouter, à l'inverse des options de périmètre : `--freshness 0` force une
+    photographie complète malgré une configuration plus permissive ;
+  - un dépôt jamais mesuré est toujours scanné, et chaque dépôt écarté est
+    affiché avec l'âge de sa dernière mesure — la décision reste visible.
+- **Suite de tests complète** *(étape 13)*. 335 tests couvrent le client GitHub
+  (authentification, `GET`, pagination, erreurs, quota), les collectors, le
+  stockage, les règles, les exports, les rapports et la CLI de bout en bout.
+  Aucun ne joint le réseau ni ne dépend d'un jeton réel.
 - **Rapports Markdown individuels** *(étape 12)*.
   - `githor report NOM` produit le rapport d'un seul dépôt : mesures, langages,
     ce qui a été vérifié, ce qui manque, releases, et depuis quand le dépôt est

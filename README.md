@@ -145,6 +145,7 @@ use_gh_cli = true                    # repli sur « gh auth token » si GITHUB_T
 include_forks = false
 include_archived = false
 commit_history_days = 90             # profondeur d'historique, 1 à 3650 jours
+snapshot_freshness_hours = 0         # dispense de remesurer un dépôt récent, 0 à 8760 heures
 
 [storage]
 database = "data/githor.db"
@@ -191,6 +192,7 @@ githor repos --include-forks      # y compris les forks
 githor repos --include-archived   # y compris les dépôts archivés
 githor scan                       # scanne tous les dépôts et enregistre un snapshot
 githor scan Architecturor         # scanne un seul dépôt
+githor scan --freshness 24        # ignore les dépôts mesurés dans les 24 dernières heures
 githor findings                   # synthèse des constats de tous les dépôts
 githor findings Architecturor     # détail d'un dépôt : ce qui est là, ce qui manque
 githor export --format json       # export complet dans data/exports/
@@ -218,7 +220,8 @@ Statut       OK
 ## Ce que le scan collecte
 
 Six appels par dépôt, soit environ 470 requêtes pour 78 projets, sur un quota
-horaire de 5 000.
+horaire de 5 000. Un dépôt jugé encore frais n'en coûte aucun : voir
+[Fraîcheur des mesures](#fraîcheur-des-mesures).
 
 | Collecte | Source | Stocké dans |
 |---|---|---|
@@ -404,6 +407,51 @@ githor scan                  # tous les dépôts du périmètre
 githor scan Architecturor    # un seul, nom court rattaché à votre compte
 githor scan autrui/projet    # un seul, nom complet
 ```
+
+### Fraîcheur des mesures
+
+Conserver l'historique impose d'ajouter un snapshot à chaque scan ; ne pas
+surcharger GitHub impose de ne pas remesurer ce qui vient de l'être. Githor
+tranche en laissant le choix : **avant d'interroger GitHub**, il relit la date du
+dernier snapshot de chaque dépôt et écarte ceux mesurés depuis moins de
+`snapshot_freshness_hours`.
+
+```console
+$ githor scan --freshness 24
+Githor — scan
+
+Repositories à scanner : 77
+
+· nouhailler/Architecturor (mesuré il y a 2 h — ignoré)
+· nouhailler/Astror (mesuré il y a 2 h — ignoré)
++ nouhailler/Sociologor (snapshot 1 · 51 fichiers · 2 langages · 12 commits/90j · 6 constats)
+…
+
+1 repository(s) scanné(s) : 1 nouveau(x), 0 mis à jour.
+76 repository(s) ignoré(s) : mesurés il y a moins de 24 h.
+```
+
+Un dépôt ignoré ne coûte **rien** : ni requête vers GitHub, ni snapshot, ni
+écriture en base. Seul le listage des dépôts subsiste — il faut bien savoir
+lesquels existent.
+
+Quatre points à retenir :
+
+- **la valeur par défaut est `0`**, et zéro ne dispense de rien : sans consigne
+  explicite, un scan mesure tout. Préserver l'historique prime sur le quota, et
+  un comportement ne change pas dans le dos de l'utilisateur ;
+- **un dépôt jamais mesuré est toujours scanné.** La fraîcheur dispense de
+  refaire une mesure, jamais d'en faire une première ;
+- **`--freshness` remplace la valeur configurée** au lieu de s'y ajouter. C'est
+  ce qui permet à `--freshness 0` de forcer un scan complet malgré une
+  configuration plus permissive — l'inverse des options de périmètre, qui ne
+  peuvent qu'élargir ce que la configuration montre ;
+- **la décision est visible.** Chaque dépôt écarté est affiché avec l'âge de sa
+  dernière mesure : rien n'est passé sous silence.
+
+Un usage typique : `snapshot_freshness_hours = 12` dans la configuration pour les
+scans du quotidien, et `githor scan --freshness 0` quand on veut une photographie
+complète, datée du jour.
 
 ## Findings
 

@@ -4,6 +4,7 @@ import json
 import logging
 import re
 import sqlite3
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -617,6 +618,161 @@ def test_scan_keeps_progress_off_stdout(
     result = runner.invoke(cli.app, ["scan"])
 
     assert "Récupération des repositories" not in plain(result.stdout)
+
+
+# ── Fraîcheur des snapshots ──────────────────────────────────────────────────
+
+
+def backdate_snapshots(root: Path, moment: datetime) -> None:
+    """Recule tous les snapshots enregistrés, pour simuler une mesure ancienne."""
+    with sqlite3.connect(root / "data" / "githor.db") as connection:
+        connection.execute(
+            "UPDATE repository_snapshots SET collected_at = ?",
+            (moment.strftime("%Y-%m-%d %H:%M:%S.%f"),),
+        )
+
+
+def test_a_recent_snapshot_spares_a_second_scan(
+    httpx_mock: HTTPXMock, authenticated: None, tmp_path: Path, repository_details: None
+) -> None:
+    mock_repository_list(httpx_mock, [repo_payload()], reusable=True)
+
+    runner.invoke(cli.app, ["scan"])
+    result = runner.invoke(cli.app, ["scan", "--freshness", "24"])
+    output = plain(result.output)
+
+    assert result.exit_code == 0
+    assert "ignoré" in output
+    assert "0 repository(s) scanné(s)" in output
+    assert "1 repository(s) ignoré(s)" in output
+    # Un décompte de zéros n'apprendrait rien quand tout a été jugé frais.
+    assert "snapshot(s)," not in output
+    assert snapshot_count(tmp_path) == 1
+
+
+def test_a_skipped_repository_costs_no_request(
+    httpx_mock: HTTPXMock, authenticated: None, repository_details: None
+) -> None:
+    """Tout l'intérêt de la manœuvre : le quota GitHub n'est pas consommé."""
+    mock_repository_list(httpx_mock, [repo_payload()], reusable=True)
+
+    runner.invoke(cli.app, ["scan"])
+    before = len(httpx_mock.get_requests())
+    runner.invoke(cli.app, ["scan", "--freshness", "24"])
+    sent = [request.url.path for request in httpx_mock.get_requests()[before:]]
+
+    # Seul le listage des dépôts subsiste : il dit quels dépôts existent.
+    assert sent == ["/user/repos"]
+
+
+def test_the_skipped_line_says_how_old_the_measure_is(
+    httpx_mock: HTTPXMock, authenticated: None, tmp_path: Path, repository_details: None
+) -> None:
+    mock_repository_list(httpx_mock, [repo_payload()], reusable=True)
+
+    runner.invoke(cli.app, ["scan"])
+    backdate_snapshots(tmp_path, datetime.now(UTC) - timedelta(hours=3))
+    result = runner.invoke(cli.app, ["scan", "--freshness", "24"])
+
+    assert "mesuré il y a 3 h" in plain(result.output)
+
+
+def test_an_older_snapshot_is_measured_again(
+    httpx_mock: HTTPXMock, authenticated: None, tmp_path: Path, repository_details: None
+) -> None:
+    mock_repository_list(httpx_mock, [repo_payload()], reusable=True)
+
+    runner.invoke(cli.app, ["scan"])
+    backdate_snapshots(tmp_path, datetime.now(UTC) - timedelta(hours=48))
+    result = runner.invoke(cli.app, ["scan", "--freshness", "24"])
+    output = plain(result.output)
+
+    assert "1 repository(s) scanné(s)" in output
+    assert "ignoré(s)" not in output
+    assert snapshot_count(tmp_path) == 2
+
+
+def test_a_repository_never_measured_is_always_scanned(
+    httpx_mock: HTTPXMock, authenticated: None, tmp_path: Path, repository_details: None
+) -> None:
+    """La fraîcheur ne peut pas dispenser d'une mesure qui n'a jamais eu lieu."""
+    mock_repository_list(httpx_mock, [repo_payload()])
+    runner.invoke(cli.app, ["scan"])
+
+    # Un second dépôt apparaît : lui n'a jamais été mesuré.
+    mock_repository_list(httpx_mock, [repo_payload(), repo_payload(id=2, full_name="nouhailler/b")])
+    result = runner.invoke(cli.app, ["scan", "--freshness", "24"])
+    output = plain(result.output)
+
+    assert "1 repository(s) scanné(s)" in output
+    assert "1 repository(s) ignoré(s)" in output
+    assert snapshot_count(tmp_path) == 2
+
+
+def test_by_default_nothing_is_skipped(
+    httpx_mock: HTTPXMock, authenticated: None, tmp_path: Path, repository_details: None
+) -> None:
+    """Sans consigne, un scan mesure tout : l'historique prime sur le quota."""
+    mock_repository_list(httpx_mock, [repo_payload()], reusable=True)
+
+    runner.invoke(cli.app, ["scan"])
+    result = runner.invoke(cli.app, ["scan"])
+
+    assert "ignoré" not in plain(result.output)
+    assert snapshot_count(tmp_path) == 2
+
+
+def test_freshness_can_be_configured(
+    httpx_mock: HTTPXMock, authenticated: None, tmp_path: Path, repository_details: None
+) -> None:
+    config = tmp_path / "config" / "config.toml"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text("[scan]\nsnapshot_freshness_hours = 24\n", encoding="utf-8")
+    mock_repository_list(httpx_mock, [repo_payload()], reusable=True)
+
+    runner.invoke(cli.app, ["scan"])
+    result = runner.invoke(cli.app, ["scan"])
+
+    assert "1 repository(s) ignoré(s)" in plain(result.output)
+    assert snapshot_count(tmp_path) == 1
+
+
+def test_the_option_overrides_the_configured_freshness(
+    httpx_mock: HTTPXMock, authenticated: None, tmp_path: Path, repository_details: None
+) -> None:
+    """``--freshness 0`` doit pouvoir forcer une mesure malgré la configuration."""
+    config = tmp_path / "config" / "config.toml"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text("[scan]\nsnapshot_freshness_hours = 24\n", encoding="utf-8")
+    mock_repository_list(httpx_mock, [repo_payload()], reusable=True)
+
+    runner.invoke(cli.app, ["scan"])
+    result = runner.invoke(cli.app, ["scan", "--freshness", "0"])
+
+    assert "ignoré" not in plain(result.output)
+    assert snapshot_count(tmp_path) == 2
+
+
+def test_a_named_repository_also_honours_freshness(
+    httpx_mock: HTTPXMock, authenticated: None, tmp_path: Path, repository_details: None
+) -> None:
+    httpx_mock.add_response(
+        url=f"{DEFAULT_API_URL}/repos/nouhailler/Architecturor",
+        json=repo_payload(),
+        is_reusable=True,
+    )
+
+    runner.invoke(cli.app, ["scan", "nouhailler/Architecturor"])
+    result = runner.invoke(cli.app, ["scan", "nouhailler/Architecturor", "--freshness", "24"])
+
+    assert "1 repository(s) ignoré(s)" in plain(result.output)
+    assert snapshot_count(tmp_path) == 1
+
+
+def test_a_refused_freshness_is_reported(authenticated: None) -> None:
+    result = runner.invoke(cli.app, ["scan", "--freshness", "-1"])
+
+    assert result.exit_code != 0
 
 
 # ── Findings (étape 10) ──────────────────────────────────────────────────────

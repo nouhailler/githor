@@ -59,13 +59,22 @@ class GitHubConfig(BaseModel):
 
 
 class ScanConfig(BaseModel):
-    """Périmètre et profondeur des scans."""
+    """Périmètre, profondeur et fraîcheur des scans."""
 
     model_config = _STRICT
 
     include_forks: bool = False
     include_archived: bool = False
     commit_history_days: int = Field(default=90, ge=1, le=3650)
+
+    snapshot_freshness_hours: int = Field(default=0, ge=0, le=8760)
+    """Durée pendant laquelle un snapshot déjà pris dispense d'en reprendre un.
+
+    Un dépôt mesuré il y a moins que cette durée est ignoré par le scan : ni
+    appel à GitHub, ni nouveau snapshot. La valeur par défaut, ``0``, ne dispense
+    de rien — chaque scan mesure tout, ce qui préserve l'historique. La relever
+    économise le quota lors de scans rapprochés.
+    """
 
 
 class StorageConfig(BaseModel):

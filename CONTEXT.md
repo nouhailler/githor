@@ -93,6 +93,22 @@ horaire de 5 000. L'arborescence est récupérée en **un seul** appel récursif
 seule la fenêtre d'historique configurée est téléchargée. Un quota bas avertit,
 un quota épuisé **arrête** — Githor n'attend jamais une heure en silence.
 
+### Le cache, c'est la base elle-même
+
+Deux exigences se contredisent : préserver l'historique demande un snapshot à
+chaque scan, ménager le quota demande de ne pas remesurer ce qui vient de
+l'être. Plutôt qu'un cache HTTP à faire vieillir en parallèle des données,
+Githor interroge **la seule source qui sait déjà tout** : la table des snapshots.
+Une requête, avant la boucle, donne la date de la dernière mesure de chaque
+dépôt ; ceux qui ont moins de `snapshot_freshness_hours` sont écartés sans
+qu'aucun appel ne parte.
+
+La valeur par défaut est `0` — rien n'est dispensé. Le quota est un coût, la
+perte d'historique une régression : le comportement par défaut doit protéger ce
+qui ne se rattrape pas. C'est aussi pourquoi `--freshness` **remplace** la valeur
+configurée au lieu de s'y ajouter, à l'inverse des options de périmètre :
+`--freshness 0` doit toujours pouvoir forcer une photographie complète.
+
 ### Une valeur absente vaut mieux qu'un chiffre faux
 
 Si la fenêtre téléchargée ne couvre pas 90 jours, le décompte à 90 jours est
@@ -131,8 +147,8 @@ doit jamais produire autre chose que le fichier attendu.
 
 ## État d'avancement
 
-Douze étapes sur treize. Ce qui manque : la complétion de la suite de tests. Le
-détail est dans le [CHANGELOG](CHANGELOG.md).
+Les treize étapes du plan sont franchies, et le cahier des charges n'a plus de
+manque connu. Le détail est dans le [CHANGELOG](CHANGELOG.md).
 
 ## Conventions
 

@@ -8,7 +8,7 @@ exceptions en messages lisibles. La logique métier vit dans les autres couches.
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Annotated
 
@@ -51,6 +51,7 @@ from githor.storage.repositories import (
     add_snapshot,
     count_snapshots,
     find_repository_by_name,
+    last_collected_at,
     latest_snapshot,
     list_stored_repositories,
     save_commits,
@@ -61,6 +62,7 @@ from githor.storage.repositories import (
     upsert_repository,
 )
 from githor.storage.tables import FindingRow, RepositoryRow
+from githor.utils.dates import format_age, utc_now
 
 console = Console()
 stderr_console = Console(stderr=True)
@@ -190,6 +192,7 @@ def config_show() -> None:
     table.add_row("scan.include_forks", str(config.scan.include_forks).lower())
     table.add_row("scan.include_archived", str(config.scan.include_archived).lower())
     table.add_row("scan.commit_history_days", str(config.scan.commit_history_days))
+    table.add_row("scan.snapshot_freshness_hours", str(config.scan.snapshot_freshness_hours))
     table.add_row("storage.database", str(config.storage.database))
     table.add_row("export.directory", str(config.export.directory))
 
@@ -247,14 +250,33 @@ def scan(
         bool,
         typer.Option("--include-archived", help="Inclut les dépôts archivés, exclus par défaut."),
     ] = False,
+    freshness: Annotated[
+        int | None,
+        typer.Option(
+            "--freshness",
+            metavar="HEURES",
+            min=0,
+            max=8760,
+            help="Ignore les dépôts mesurés il y a moins de HEURES heures ; "
+            "0 les remesure tous. Par défaut : scan.snapshot_freshness_hours.",
+        ),
+    ] = None,
 ) -> None:
     """Scanne les repositories et enregistre un snapshot de chacun.
 
     Chaque exécution **ajoute** un snapshot : les mesures précédentes sont
     conservées, afin de pouvoir suivre l'évolution des projets.
+
+    Un dépôt déjà mesuré depuis moins de --freshness heures est ignoré : Githor
+    n'interroge pas GitHub à son sujet et n'ajoute pas de snapshot.
     """
     config = current_config()
-    scope = _scope(config, include_forks=include_forks, include_archived=include_archived)
+    scope = _scope(
+        config,
+        include_forks=include_forks,
+        include_archived=include_archived,
+        freshness=freshness,
+    )
     token = require_token(allow_gh_cli=config.github.use_gh_cli)
 
     console.print("[bold]Githor — scan[/bold]\n")
@@ -282,24 +304,32 @@ def scan(
         quota = client.rate_limit
 
     console.print(
-        f"\n[bold]{len(collection.repositories)}[/bold] repository(s) scanné(s) : "
+        f"\n[bold]{totals.scanned}[/bold] repository(s) scanné(s) : "
         f"{totals.created} nouveau(x), {totals.updated} mis à jour.",
         highlight=False,
     )
-    console.print(
-        f"{totals.snapshots} snapshot(s), {totals.languages} langage(s), "
-        f"{totals.files} entrée(s) d'arborescence, {totals.commits} commit(s) ajouté(s).",
-        highlight=False,
-    )
-    console.print(
-        f"{totals.releases} release(s) et {totals.issues} issue(s) enregistrées.",
-        highlight=False,
-    )
-    console.print(
-        f"{totals.findings} constat(s) évalué(s), dont "
-        f"[bold]{totals.findings_open}[/bold] ouvert(s).",
-        highlight=False,
-    )
+    if totals.skipped:
+        console.print(
+            f"{totals.skipped} repository(s) ignoré(s) : mesurés il y a moins de "
+            f"{scope.snapshot_freshness_hours} h.",
+            highlight=False,
+        )
+    # Trois lignes de zéros n'apprendraient rien quand tout a été jugé frais.
+    if totals.scanned:
+        console.print(
+            f"{totals.snapshots} snapshot(s), {totals.languages} langage(s), "
+            f"{totals.files} entrée(s) d'arborescence, {totals.commits} commit(s) ajouté(s).",
+            highlight=False,
+        )
+        console.print(
+            f"{totals.releases} release(s) et {totals.issues} issue(s) enregistrées.",
+            highlight=False,
+        )
+        console.print(
+            f"{totals.findings} constat(s) évalué(s), dont "
+            f"[bold]{totals.findings_open}[/bold] ouvert(s).",
+            highlight=False,
+        )
     console.print(f"Base : {config.storage.database}", highlight=False)
     _print_exclusions(collection)
 
@@ -307,14 +337,23 @@ def scan(
         console.print(f"[yellow]Quota GitHub bas : {quota.remaining} / {quota.limit}.[/yellow]")
 
 
-def _scope(config: Config, *, include_forks: bool, include_archived: bool) -> ScanConfig:
-    """Combine le périmètre configuré et les élargissements demandés en option."""
-    return config.scan.model_copy(
-        update={
-            "include_forks": config.scan.include_forks or include_forks,
-            "include_archived": config.scan.include_archived or include_archived,
-        }
-    )
+def _scope(
+    config: Config, *, include_forks: bool, include_archived: bool, freshness: int | None = None
+) -> ScanConfig:
+    """Combine le périmètre configuré et ce que la ligne de commande en dit.
+
+    Les élargissements de périmètre s'**ajoutent** à la configuration : une
+    option ne peut que montrer davantage de dépôts. La fraîcheur, elle,
+    **remplace** la valeur configurée, afin que ``--freshness 0`` puisse forcer
+    un scan complet malgré une configuration plus permissive.
+    """
+    update: dict[str, object] = {
+        "include_forks": config.scan.include_forks or include_forks,
+        "include_archived": config.scan.include_archived or include_archived,
+    }
+    if freshness is not None:
+        update["snapshot_freshness_hours"] = freshness
+    return config.scan.model_copy(update=update)
 
 
 def _fetch_one(client: GitHubClient, name: str) -> Repository:
@@ -335,6 +374,9 @@ class ScanTotals:
 
     created: int = 0
     updated: int = 0
+    skipped: int = 0
+    """Dépôts jugés assez frais pour n'être ni interrogés ni remesurés."""
+
     snapshots: int = 0
     languages: int = 0
     files: int = 0
@@ -343,6 +385,32 @@ class ScanTotals:
     findings_open: int = 0
     releases: int = 0
     issues: int = 0
+
+    @property
+    def scanned(self) -> int:
+        """Dépôts réellement mesurés, les ignorés mis à part."""
+        return self.created + self.updated
+
+
+def _fresh_age(last_collected: datetime | None, *, hours: int, now: datetime) -> timedelta | None:
+    """Âge du dernier snapshot s'il dispense d'en reprendre un.
+
+    Args:
+        last_collected: date du dernier snapshot, ``None`` si le dépôt n'a
+            jamais été mesuré.
+        hours: durée de fraîcheur configurée ; ``0`` ne dispense de rien.
+        now: instant de référence.
+
+    Returns:
+        L'âge de la mesure si elle est encore fraîche, ``None`` s'il faut
+        rescanner. Une date en avance sur l'horloge est traitée comme fraîche :
+        remesurer ne corrigerait pas une horloge qui dérive.
+    """
+    if hours <= 0 or last_collected is None:
+        return None
+
+    age = now - last_collected
+    return age if age < timedelta(hours=hours) else None
 
 
 def _persist(
@@ -355,8 +423,16 @@ def _persist(
 
     Chaque dépôt est traité dans sa propre transaction : un dépôt en échec
     n'annule pas le travail déjà accompli sur les précédents.
+
+    Les dates des dernières mesures sont relues **d'un coup, avant la boucle** :
+    un dépôt encore frais est écarté sans qu'aucune requête ne parte vers
+    GitHub, ce qui est tout l'intérêt de la manœuvre.
     """
     totals = ScanTotals()
+    now = utc_now()
+
+    with database.session() as session:
+        measured = last_collected_at(session, [item.github_id for item in repositories])
 
     with Progress(
         SpinnerColumn(),
@@ -370,6 +446,21 @@ def _persist(
 
         for repository in repositories:
             progress.update(task, description=repository.full_name)
+
+            age = _fresh_age(
+                measured.get(repository.github_id),
+                hours=scope.snapshot_freshness_hours,
+                now=now,
+            )
+            if age is not None:
+                totals.skipped += 1
+                console.print(
+                    f"[dim]· {repository.full_name} (mesuré il y a {format_age(age)} "
+                    f"— ignoré)[/dim]",
+                    highlight=False,
+                )
+                progress.advance(task)
+                continue
 
             languages = collect_languages(client, repository.full_name)
             structure = collect_structure(client, repository)
