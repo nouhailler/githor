@@ -19,6 +19,7 @@ from rich.table import Table
 from sqlalchemy.orm import Session
 
 from githor import __version__
+from githor.analysis.audit import audit_checkout
 from githor.collectors.activity import collect_activity
 from githor.collectors.issues import collect_issues
 from githor.collectors.languages import collect_languages
@@ -39,6 +40,7 @@ from githor.github.repositories import get_repository
 from githor.github.token import find_token, require_token
 from githor.github.user import get_authenticated_login, get_authenticated_user
 from githor.logging import get_logger, setup_logging
+from githor.models.code import CodeAudit, ImportKind
 from githor.models.finding import SEVERITY_LABELS, SEVERITY_ORDER, Severity, Status
 from githor.models.repository import Repository
 from githor.reports import build_report, render_report, write_report
@@ -627,6 +629,185 @@ def _stored_repositories(config: Config, name: str | None) -> list[RepositoryRow
         raise typer.Exit(code=1)
 
     return rows
+
+
+@app.command("audit")
+def audit(
+    repository: Annotated[
+        str | None,
+        typer.Argument(
+            metavar="REPOSITORY",
+            help="Dépôt à analyser ; tous ceux de la base par défaut.",
+        ),
+    ] = None,
+    offline: Annotated[
+        bool,
+        typer.Option(
+            "--offline",
+            help="N'interroge pas l'origine : analyse les miroirs déjà présents.",
+        ),
+    ] = False,
+) -> None:
+    """Analyse le code source des dépôts, localement.
+
+    L'analyse porte sur le miroir local, qu'elle met à jour au passage. Elle
+    compte les lignes de tous les langages reconnus, et n'établit structure,
+    complexité et imports que pour Python — où ils viennent de l'AST de
+    l'interpréteur, non d'une heuristique.
+
+    Comme le reste des commandes locales, elle relit la base et n'appelle pas
+    l'API GitHub : aucun quota n'est consommé.
+    """
+    config = current_config()
+    rows = _stored_repositories(config, repository)
+
+    console.print("[bold]Githor — audit du code[/bold]\n")
+    detailed = len(rows) == 1
+    results: list[tuple[str, CodeAudit]] = []
+    failed = 0
+
+    for row in rows:
+        try:
+            checkout = _mirror_one(row, config.audit, fetch=not offline)
+        except GitError as exc:
+            failed += 1
+            stderr_console.print(f"[red]✗[/red] {row.full_name} : {exc}", highlight=False)
+            continue
+
+        with stderr_console.status(f"Analyse de {row.full_name}…"):
+            result = audit_checkout(
+                checkout.path,
+                commit=checkout.head,
+                branch=checkout.branch,
+                max_file_bytes=config.audit.max_file_bytes,
+            )
+        results.append((row.full_name, result))
+
+        if detailed:
+            _print_audit_detail(row.full_name, result)
+
+    if not detailed and results:
+        console.print(_audit_table(results))
+
+    console.print(
+        f"\n[bold]{len(results)}[/bold] dépôt(s) analysé(s), "
+        f"{sum(item.files_analysed for _, item in results)} fichier(s) lus.",
+        highlight=False,
+    )
+    if failed:
+        console.print(f"[red]{failed} dépôt(s) en échec.[/red]", highlight=False)
+        raise typer.Exit(code=1)
+
+
+def _print_audit_detail(full_name: str, result: CodeAudit) -> None:
+    """Détaille l'analyse d'un seul dépôt."""
+    console.print(
+        f"[bold]{full_name}[/bold] [dim]{result.branch} · {result.commit[:7]}[/dim]\n",
+        highlight=False,
+    )
+
+    summary = Table(show_header=False, box=None, pad_edge=False)
+    summary.add_column(style="dim")
+    summary.add_column()
+
+    lines = result.lines
+    summary.add_row("Fichiers", _audit_files_summary(result))
+    summary.add_row(
+        "Lignes",
+        f"{lines.total} ({lines.code} code, {lines.comment} commentaire, {lines.blank} vide)",
+    )
+    ratio = lines.comment_ratio
+    summary.add_row("Part commentée", "—" if ratio is None else f"{ratio} %")
+    summary.add_row(
+        "Structure", f"{len(result.functions)} fonction(s), {result.class_count} classe(s)"
+    )
+    average = result.average_complexity
+    summary.add_row(
+        "Complexité",
+        "—" if average is None else f"moyenne {average}, maximum {result.max_complexity}",
+    )
+    console.print(summary)
+
+    if result.languages:
+        console.print()
+        console.print(_languages_table(result))
+
+    complex_functions = result.most_complex()
+    if complex_functions and result.max_complexity > 1:
+        console.print()
+        table = Table(title="Fonctions les plus complexes", title_justify="left")
+        table.add_column("Complexité", justify="right")
+        table.add_column("Fonction")
+        table.add_column("Fichier", style="dim")
+        placement = {
+            function.name: module.path for module in result.modules for function in module.functions
+        }
+        for function in complex_functions:
+            table.add_row(str(function.complexity), function.name, placement.get(function.name, ""))
+        console.print(table)
+
+    third_party = result.imports_of_kind(ImportKind.THIRD_PARTY)
+    if third_party:
+        console.print(f"\n[dim]Imports tierce partie :[/dim] {', '.join(third_party)}")
+
+    errors = result.parse_errors
+    if errors:
+        console.print(f"\n[yellow]{len(errors)} fichier(s) non analysables :[/yellow]")
+        for module in errors[:5]:
+            console.print(f"  [dim]{module.path} — {module.parse_error}[/dim]", highlight=False)
+
+
+def _audit_files_summary(result: CodeAudit) -> str:
+    """Décrit ce qui a été lu et ce qui a été écarté, sans rien taire."""
+    parts = [f"{result.files_analysed} analysé(s)"]
+    if result.files_binary:
+        parts.append(f"{result.files_binary} binaire(s)")
+    if result.files_too_large:
+        parts.append(f"{result.files_too_large} trop gros")
+    return ", ".join(parts)
+
+
+def _languages_table(result: CodeAudit) -> Table:
+    """Répartition des langages telle qu'elle est sur disque."""
+    table = Table(title="Langages", title_justify="left")
+    table.add_column("Langage")
+    table.add_column("Fichiers", justify="right")
+    table.add_column("Code", justify="right")
+    table.add_column("Commentaire", justify="right")
+
+    for item in result.languages:
+        table.add_row(
+            item.language,
+            str(item.files),
+            str(item.lines.code),
+            str(item.lines.comment),
+        )
+    return table
+
+
+def _audit_table(results: Sequence[tuple[str, CodeAudit]]) -> Table:
+    """Synthèse d'un audit portant sur plusieurs dépôts."""
+    table = Table()
+    table.add_column("Repository")
+    table.add_column("Fichiers", justify="right")
+    table.add_column("Code", justify="right")
+    table.add_column("Langage")
+    table.add_column("Fonctions", justify="right")
+    table.add_column("Compl. moy.", justify="right")
+    table.add_column("Compl. max", justify="right")
+
+    for full_name, result in results:
+        average = result.average_complexity
+        table.add_row(
+            full_name,
+            str(result.files_analysed),
+            str(result.lines.code),
+            result.languages[0].language if result.languages else "—",
+            str(len(result.functions)),
+            "—" if average is None else f"{average}",
+            str(result.max_complexity) if result.functions else "—",
+        )
+    return table
 
 
 @app.command("export")

@@ -1255,3 +1255,108 @@ def test_mirror_does_not_call_github(database_with_repository: Path) -> None:
     requête réellement émise.
     """
     assert runner.invoke(cli.app, ["mirror"]).exit_code == 0
+
+
+# ── githor audit ─────────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def remote_with_code(remote_repository: Path) -> Path:
+    """Ajoute à l'origine locale du code Python analysable."""
+    source = remote_repository / "src" / "paquet"
+    source.mkdir(parents=True)
+    (source / "__init__.py").write_text('"""Paquet."""\n', encoding="utf-8")
+    (source / "app.py").write_text(
+        '"""Module."""\n'
+        "import os\n"
+        "import httpx\n"
+        "\n"
+        "\n"
+        "class Service:\n"
+        "    def traiter(self, valeur):\n"
+        "        if valeur:\n"
+        "            return 1\n"
+        "        return 0\n",
+        encoding="utf-8",
+    )
+    (remote_repository / "app.ts").write_text("const a = 1;\n", encoding="utf-8")
+    git("add", ".", cwd=remote_repository)
+    git("commit", "--quiet", "-m", "Du code", cwd=remote_repository)
+    return remote_repository
+
+
+def test_audit_analyses_a_single_repository(
+    database_with_repository: Path, remote_with_code: Path
+) -> None:
+    result = runner.invoke(cli.app, ["audit", "depot"])
+    output = plain(result.output)
+
+    assert result.exit_code == 0
+    assert "proprio/depot" in output
+    assert "Python" in output
+    assert "TypeScript" in output
+    assert "1 dépôt(s) analysé(s)" in output
+
+
+def test_audit_reports_structure_and_complexity(
+    database_with_repository: Path, remote_with_code: Path
+) -> None:
+    output = plain(runner.invoke(cli.app, ["audit", "depot"]).output)
+
+    assert "Service.traiter" in output
+    assert "1 fonction(s), 1 classe(s)" in output
+
+
+def test_audit_names_third_party_imports(
+    database_with_repository: Path, remote_with_code: Path
+) -> None:
+    """« os » vient de la bibliothèque standard, « httpx » doit être installé."""
+    output = plain(runner.invoke(cli.app, ["audit", "depot"]).output)
+
+    assert "Imports tierce partie : httpx" in output
+
+
+def test_audit_clones_the_repository_when_needed(
+    database_with_repository: Path, remote_with_code: Path
+) -> None:
+    assert runner.invoke(cli.app, ["audit"]).exit_code == 0
+    assert (database_with_repository / "data" / "repos" / "proprio" / "depot").is_dir()
+
+
+def test_audit_works_offline_on_an_existing_mirror(
+    database_with_repository: Path, remote_with_code: Path
+) -> None:
+    runner.invoke(cli.app, ["mirror"])
+
+    result = runner.invoke(cli.app, ["audit", "--offline"])
+
+    assert result.exit_code == 0
+    assert "1 dépôt(s) analysé(s)" in plain(result.output)
+
+
+def test_audit_offline_without_a_mirror_fails_clearly(
+    database_with_repository: Path, remote_with_code: Path
+) -> None:
+    result = runner.invoke(cli.app, ["audit", "--offline"])
+
+    assert result.exit_code == 1
+    assert "1 dépôt(s) en échec" in plain(result.output)
+
+
+def test_audit_rejects_an_unknown_repository(database_with_repository: Path) -> None:
+    result = runner.invoke(cli.app, ["audit", "inconnu"])
+
+    assert result.exit_code == 1
+    assert "Repository inconnu" in plain(result.output)
+
+
+def test_audit_without_a_database_says_what_to_run(authenticated: None, tmp_path: Path) -> None:
+    result = runner.invoke(cli.app, ["audit"])
+
+    assert result.exit_code == 1
+    assert "githor scan" in plain(result.output)
+
+
+def test_audit_does_not_call_github(database_with_repository: Path, remote_with_code: Path) -> None:
+    """Aucune réponse HTTP n'est enregistrée : une vraie requête ferait échouer le test."""
+    assert runner.invoke(cli.app, ["audit"]).exit_code == 0
