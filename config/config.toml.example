@@ -40,6 +40,25 @@ commit_history_days = 90
 # remplace ponctuellement cette valeur, et « --freshness 0 » force un scan complet.
 snapshot_freshness_hours = 0
 
+[audit]
+# Racine sous laquelle « githor mirror » clone les dépôts, un répertoire par
+# propriétaire. Ce répertoire appartient à Githor : il y remet les copies à
+# l'état publié, et refuse de toucher tout dépôt qu'il n'a pas cloné lui-même.
+workspace = "data/repos"
+
+# Profondeur du clone superficiel (0 à 100000). L'analyse porte sur l'état du
+# code, pas sur son passé : un seul commit suffit. La valeur 0 récupère tout
+# l'historique, ce qui ne sert qu'à inspecter le miroir à la main.
+clone_depth = 1
+
+# Délai accordé à chaque commande git, clone compris, en secondes (1 à 3600).
+git_timeout_seconds = 300
+
+# Au-delà de cette taille, un fichier est compté mais pas analysé (1024 à
+# 100000000 octets). Un fichier d'un mégaoctet n'est plus du code écrit à la
+# main : l'analyser fausserait toutes les moyennes.
+max_file_bytes = 1000000
+
 [storage]
 database = "data/githor.db"
 

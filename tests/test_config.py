@@ -233,3 +233,52 @@ def test_gh_cli_fallback_can_be_disabled(tmp_path: Path) -> None:
     path = write(tmp_path / "gh.toml", "[github]\nuse_gh_cli = false\n")
 
     assert load_config(path, base_dir=tmp_path).github.use_gh_cli is False
+
+
+# ── Audit de code ────────────────────────────────────────────────────────────
+
+
+def test_audit_defaults_are_conservative(tmp_path: Path) -> None:
+    """Un clone d'un seul commit suffit à décrire l'état du code."""
+    audit = load_config(base_dir=tmp_path).audit
+
+    assert audit.workspace == tmp_path / "data" / "repos"
+    assert audit.clone_depth == 1
+    assert audit.git_timeout_seconds == 300
+    assert audit.max_file_bytes == 1_000_000
+
+
+def test_audit_workspace_is_resolved_against_base_dir(tmp_path: Path) -> None:
+    path = write(tmp_path / "audit.toml", '[audit]\nworkspace = "miroirs"\n')
+
+    assert load_config(path, base_dir=tmp_path).audit.workspace == tmp_path / "miroirs"
+
+
+def test_an_absolute_workspace_is_preserved(tmp_path: Path) -> None:
+    absolute = tmp_path / "ailleurs" / "miroirs"
+    path = write(tmp_path / "audit.toml", f'[audit]\nworkspace = "{absolute}"\n')
+
+    assert load_config(path, base_dir=tmp_path).audit.workspace == absolute
+
+
+def test_a_full_clone_is_allowed(tmp_path: Path) -> None:
+    """Zéro ne veut pas dire « rien » mais « tout l'historique »."""
+    path = write(tmp_path / "audit.toml", "[audit]\nclone_depth = 0\n")
+
+    assert load_config(path, base_dir=tmp_path).audit.clone_depth == 0
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("clone_depth", -1),
+        ("git_timeout_seconds", 0),
+        ("git_timeout_seconds", 3601),
+        ("max_file_bytes", 100),
+    ],
+)
+def test_a_refused_audit_value_is_reported(tmp_path: Path, key: str, value: int) -> None:
+    path = write(tmp_path / "audit.toml", f"[audit]\n{key} = {value}\n")
+
+    with pytest.raises(ConfigError, match=key):
+        load_config(path, base_dir=tmp_path)

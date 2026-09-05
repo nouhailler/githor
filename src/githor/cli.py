@@ -30,7 +30,7 @@ from githor.collectors.repositories import (
     normalise_repository,
 )
 from githor.collectors.structure import collect_structure
-from githor.config import Config, ScanConfig, load_config
+from githor.config import AuditConfig, Config, ScanConfig, load_config
 from githor.errors import GithorError
 from githor.exporters import ExportFormat, build_dataset, write_export
 from githor.github.client import GitHubClient, RateLimit
@@ -63,6 +63,7 @@ from githor.storage.repositories import (
 )
 from githor.storage.tables import FindingRow, RepositoryRow
 from githor.utils.dates import format_age, utc_now
+from githor.vcs.git import Checkout, GitError, clone_url_for, ensure_checkout, git_version
 
 console = Console()
 stderr_console = Console(stderr=True)
@@ -193,6 +194,10 @@ def config_show() -> None:
     table.add_row("scan.include_archived", str(config.scan.include_archived).lower())
     table.add_row("scan.commit_history_days", str(config.scan.commit_history_days))
     table.add_row("scan.snapshot_freshness_hours", str(config.scan.snapshot_freshness_hours))
+    table.add_row("audit.workspace", str(config.audit.workspace))
+    table.add_row("audit.clone_depth", str(config.audit.clone_depth))
+    table.add_row("audit.git_timeout_seconds", str(config.audit.git_timeout_seconds))
+    table.add_row("audit.max_file_bytes", str(config.audit.max_file_bytes))
     table.add_row("storage.database", str(config.storage.database))
     table.add_row("export.directory", str(config.export.directory))
 
@@ -505,6 +510,123 @@ def _persist(
             progress.advance(task)
 
     return totals
+
+
+@app.command("mirror")
+def mirror(
+    repository: Annotated[
+        str | None,
+        typer.Argument(
+            metavar="REPOSITORY",
+            help="Dépôt à cloner ou mettre à jour ; tous ceux de la base par défaut.",
+        ),
+    ] = None,
+    offline: Annotated[
+        bool,
+        typer.Option(
+            "--offline",
+            help="N'interroge pas l'origine : se contente des copies déjà présentes.",
+        ),
+    ] = False,
+) -> None:
+    """Clone ou met à jour la copie locale des dépôts enregistrés.
+
+    Le miroir est ce sur quoi porteront les analyses de code : il est cloné
+    superficiellement, sur la seule branche par défaut, et n'est jamais modifié
+    par Githor autrement qu'en le ramenant à l'état publié.
+
+    La commande relit la **base** et n'appelle pas l'API GitHub : elle ne
+    consomme donc aucun quota. Elle a en revanche besoin de « git » et, pour un
+    dépôt privé, des identifiants que « git » utilise habituellement.
+    """
+    config = current_config()
+    rows = _stored_repositories(config, repository)
+
+    version = git_version(timeout=config.audit.git_timeout_seconds)
+    console.print("[bold]Githor — miroir local[/bold]\n")
+    console.print(f"[dim]{version} · {config.audit.workspace}[/dim]\n", highlight=False)
+
+    created = updated = failed = 0
+
+    for row in rows:
+        try:
+            checkout = _mirror_one(row, config.audit, fetch=not offline)
+        except GitError as exc:
+            failed += 1
+            stderr_console.print(f"[red]✗[/red] {row.full_name} : {exc}", highlight=False)
+            continue
+
+        created += int(checkout.created)
+        updated += int(not checkout.created)
+        marker = "[green]+[/green]" if checkout.created else "[green]✓[/green]"
+        console.print(
+            f"{marker} {row.full_name} [dim]({checkout.branch} · {checkout.short_head} · "
+            f"{checkout.path})[/dim]",
+            highlight=False,
+        )
+
+    console.print(
+        f"\n[bold]{created + updated}[/bold] miroir(s) à jour : "
+        f"{created} cloné(s), {updated} relu(s).",
+        highlight=False,
+    )
+    if offline:
+        console.print("[dim]Mode hors ligne : aucune origine n'a été interrogée.[/dim]")
+    if failed:
+        console.print(f"[red]{failed} dépôt(s) en échec.[/red]", highlight=False)
+        raise typer.Exit(code=1)
+
+
+def _mirror_one(row: RepositoryRow, audit: AuditConfig, *, fetch: bool) -> Checkout:
+    """Garantit le miroir d'un dépôt à partir de ce que la base sait de lui."""
+    return ensure_checkout(
+        url=clone_url_for(row.url),
+        full_name=row.full_name,
+        branch=row.default_branch,
+        workspace=audit.workspace,
+        depth=audit.clone_depth,
+        timeout=audit.git_timeout_seconds,
+        fetch=fetch,
+    )
+
+
+def _stored_repositories(config: Config, name: str | None) -> list[RepositoryRow]:
+    """Retourne les dépôts visés dans la base : un seul, ou tous.
+
+    Les commandes locales travaillent sur ce que le scan a déjà enregistré.
+    Sans base, il n'y a rien à faire — et le dire vaut mieux que produire une
+    liste vide.
+
+    Raises:
+        typer.Exit: base absente, base vide, ou nom inconnu.
+    """
+    if not config.storage.database.exists():
+        console.print(
+            f"Aucune base à {config.storage.database} : lancez d'abord [bold]githor scan[/bold].",
+            highlight=False,
+        )
+        raise typer.Exit(code=1)
+
+    with open_database(config) as database:
+        database.create_schema()
+        with database.session() as session:
+            if name is None:
+                rows = list_stored_repositories(session)
+            else:
+                found = find_repository_by_name(session, name)
+                if found is None:
+                    console.print(
+                        f"[red]Repository inconnu de la base :[/red] {name}", highlight=False
+                    )
+                    console.print("[dim]Voir githor findings sans argument.[/dim]")
+                    raise typer.Exit(code=1)
+                rows = [found]
+
+    if not rows:
+        console.print("Aucun repository enregistré : lancez d'abord [bold]githor scan[/bold].")
+        raise typer.Exit(code=1)
+
+    return rows
 
 
 @app.command("export")

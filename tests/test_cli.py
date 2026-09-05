@@ -4,6 +4,7 @@ import json
 import logging
 import re
 import sqlite3
+import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -18,6 +19,9 @@ from githor.errors import ConfigError
 from githor.github.client import DEFAULT_API_URL
 from githor.github.errors import AuthenticationError, NotFoundError
 from githor.github.token import ResolvedToken, TokenSource
+from githor.models.repository import Repository
+from githor.storage.database import Database
+from githor.storage.repositories import upsert_repository
 
 runner = CliRunner()
 
@@ -1084,3 +1088,170 @@ def test_report_without_a_database_explains_how_to_start(
 
     assert result.exit_code == 1
     assert "githor scan" in plain(result.output)
+
+
+# ── githor mirror ────────────────────────────────────────────────────────────
+
+
+def git(*arguments: str, cwd: Path) -> None:
+    """Lance une commande git dans un dépôt de test."""
+    subprocess.run(("git", *arguments), cwd=cwd, capture_output=True, text=True, check=True)
+
+
+@pytest.fixture
+def remote_repository(tmp_path: Path) -> Path:
+    """Crée un dépôt git local servant d'origine au miroir."""
+    origin = tmp_path / "origine"
+    origin.mkdir()
+    git("init", "--quiet", "--initial-branch", "main", cwd=origin)
+    git("config", "user.email", "test@githor.local", cwd=origin)
+    git("config", "user.name", "Test Githor", cwd=origin)
+    (origin / "module.py").write_text("VALEUR = 1\n", encoding="utf-8")
+    git("add", ".", cwd=origin)
+    git("commit", "--quiet", "-m", "Premier commit", cwd=origin)
+    return origin
+
+
+@pytest.fixture
+def database_with_repository(authenticated: None, tmp_path: Path, remote_repository: Path) -> Path:
+    """Enregistre en base un dépôt dont l'URL désigne l'origine locale."""
+    database = Database(tmp_path / "data" / "githor.db")
+    database.create_schema()
+    with database.session() as session:
+        upsert_repository(
+            session,
+            Repository(
+                github_id=1,
+                name="depot",
+                full_name="proprio/depot",
+                owner="proprio",
+                html_url=f"file://{remote_repository}",
+                default_branch="main",
+            ),
+        )
+    database.close()
+    return tmp_path
+
+
+def test_mirror_clones_a_registered_repository(database_with_repository: Path) -> None:
+    result = runner.invoke(cli.app, ["mirror"])
+    output = plain(result.output)
+
+    assert result.exit_code == 0
+    assert "proprio/depot" in output
+    assert "1 miroir(s) à jour : 1 cloné(s), 0 relu(s)" in output
+    assert (
+        database_with_repository / "data" / "repos" / "proprio" / "depot" / "module.py"
+    ).exists()
+
+
+def test_a_second_mirror_updates_instead_of_cloning(database_with_repository: Path) -> None:
+    runner.invoke(cli.app, ["mirror"])
+
+    result = runner.invoke(cli.app, ["mirror"])
+    output = plain(result.output)
+
+    assert result.exit_code == 0
+    assert "0 cloné(s), 1 relu(s)" in output
+
+
+def test_mirror_reports_the_analysed_commit(
+    database_with_repository: Path, remote_repository: Path
+) -> None:
+    """Le miroir doit dire sur quel état il est, sans quoi une analyse est indatable."""
+    head = subprocess.run(
+        ("git", "rev-parse", "HEAD"),
+        cwd=remote_repository,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+    output = plain(runner.invoke(cli.app, ["mirror"]).output)
+
+    assert head[:7] in output
+
+
+def test_mirror_accepts_a_single_repository(database_with_repository: Path) -> None:
+    result = runner.invoke(cli.app, ["mirror", "depot"])
+
+    assert result.exit_code == 0
+    assert "1 miroir(s) à jour" in plain(result.output)
+
+
+def test_mirror_rejects_an_unknown_repository(database_with_repository: Path) -> None:
+    result = runner.invoke(cli.app, ["mirror", "inconnu"])
+
+    assert result.exit_code == 1
+    assert "Repository inconnu" in plain(result.output)
+
+
+def test_mirror_without_a_database_says_what_to_run(authenticated: None, tmp_path: Path) -> None:
+    result = runner.invoke(cli.app, ["mirror"])
+
+    assert result.exit_code == 1
+    assert "githor scan" in plain(result.output)
+
+
+def test_offline_mirror_never_contacts_the_origin(
+    database_with_repository: Path, remote_repository: Path
+) -> None:
+    runner.invoke(cli.app, ["mirror"])
+    (remote_repository / "module.py").write_text("VALEUR = 2\n", encoding="utf-8")
+    git("commit", "--quiet", "-am", "Non récupéré", cwd=remote_repository)
+
+    result = runner.invoke(cli.app, ["mirror", "--offline"])
+    mirrored = database_with_repository / "data" / "repos" / "proprio" / "depot" / "module.py"
+
+    assert result.exit_code == 0
+    assert "hors ligne" in plain(result.output)
+    assert mirrored.read_text() == "VALEUR = 1\n"
+
+
+def test_a_failing_repository_is_reported_without_stopping_the_others(
+    authenticated: None, tmp_path: Path, remote_repository: Path
+) -> None:
+    """Un dépôt injoignable ne doit pas empêcher de cloner les suivants."""
+    database = Database(tmp_path / "data" / "githor.db")
+    database.create_schema()
+    with database.session() as session:
+        upsert_repository(
+            session,
+            Repository(
+                github_id=1,
+                name="absent",
+                full_name="proprio/absent",
+                owner="proprio",
+                html_url=f"file://{tmp_path / 'nulle-part'}",
+                default_branch="main",
+            ),
+        )
+        upsert_repository(
+            session,
+            Repository(
+                github_id=2,
+                name="depot",
+                full_name="proprio/depot",
+                owner="proprio",
+                html_url=f"file://{remote_repository}",
+                default_branch="main",
+            ),
+        )
+    database.close()
+
+    result = runner.invoke(cli.app, ["mirror"])
+    output = plain(result.output)
+
+    assert result.exit_code == 1
+    assert "1 dépôt(s) en échec" in output
+    assert "1 miroir(s) à jour" in output
+    assert (tmp_path / "data" / "repos" / "proprio" / "depot" / "module.py").exists()
+
+
+def test_mirror_does_not_call_github(database_with_repository: Path) -> None:
+    """La commande relit la base : aucun quota ne doit être consommé.
+
+    Aucune réponse HTTP n'est enregistrée ; pytest-httpx échouerait sur toute
+    requête réellement émise.
+    """
+    assert runner.invoke(cli.app, ["mirror"]).exit_code == 0

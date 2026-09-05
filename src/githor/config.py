@@ -14,8 +14,9 @@ Ordre de recherche du fichier, du plus prioritaire au moins prioritaire :
 Si aucun fichier n'est trouvé, les valeurs par défaut s'appliquent : Githor
 fonctionne sans configuration.
 
-Les chemins relatifs (base SQLite, répertoire d'export) sont résolus depuis le
-**répertoire de travail courant**, sans exception ni cas particulier.
+Les chemins relatifs (base SQLite, répertoire d'export, espace de travail des
+clones) sont résolus depuis le **répertoire de travail courant**, sans exception
+ni cas particulier.
 """
 
 import os
@@ -77,6 +78,33 @@ class ScanConfig(BaseModel):
     """
 
 
+class AuditConfig(BaseModel):
+    """Miroir local et périmètre de l'analyse de code."""
+
+    model_config = _STRICT
+
+    workspace: Path = Path("data/repos")
+    """Racine sous laquelle les dépôts sont clonés, un répertoire par propriétaire."""
+
+    clone_depth: int = Field(default=1, ge=0, le=100000)
+    """Profondeur du clone superficiel ; ``0`` récupère tout l'historique.
+
+    L'analyse porte sur l'état du code, jamais sur son passé : un seul commit
+    suffit. La relever ne sert qu'à qui veut inspecter le miroir à la main.
+    """
+
+    git_timeout_seconds: int = Field(default=300, ge=1, le=3600)
+    """Délai accordé à chaque commande ``git``, clone compris."""
+
+    max_file_bytes: int = Field(default=1_000_000, ge=1024, le=100_000_000)
+    """Au-delà de cette taille, un fichier est compté mais pas analysé.
+
+    Un fichier d'un mégaoctet n'est plus du code écrit à la main : c'est un
+    minifié, une donnée embarquée ou un artefact. L'analyser coûterait cher et
+    fausserait toutes les moyennes.
+    """
+
+
 class StorageConfig(BaseModel):
     """Emplacement de la base SQLite."""
 
@@ -103,6 +131,7 @@ class Config(BaseModel):
 
     github: GitHubConfig = Field(default_factory=GitHubConfig)
     scan: ScanConfig = Field(default_factory=ScanConfig)
+    audit: AuditConfig = Field(default_factory=AuditConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
     export: ExportConfig = Field(default_factory=ExportConfig)
 
@@ -123,6 +152,9 @@ class Config(BaseModel):
                 ),
                 "export": self.export.model_copy(
                     update={"directory": _absolute(self.export.directory, base)}
+                ),
+                "audit": self.audit.model_copy(
+                    update={"workspace": _absolute(self.audit.workspace, base)}
                 ),
             }
         )

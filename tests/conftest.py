@@ -1,6 +1,7 @@
 """Fixtures communes à la suite de tests."""
 
 import logging
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -42,12 +43,20 @@ def neutralise_gh_cli(monkeypatch: pytest.MonkeyPatch) -> None:
     Sans ce garde-fou, un test lancé sur une machine où ``gh`` est authentifié
     récupérerait un jeton GitHub réel : les tests ne doivent jamais en dépendre.
     Les tests qui portent sur ce chemin remplacent eux-mêmes ``subprocess.run``.
+
+    Seul ``gh`` est neutralisé, et non ``subprocess.run`` tout entier :
+    ``githor.vcs`` lance de vrais ``git`` sur des dépôts temporaires, et les
+    couper reviendrait à ne plus tester que des imitations.
     """
+    real_run = subprocess.run
 
-    def refuse(*args: object, **kwargs: object) -> None:
-        raise FileNotFoundError("gh est neutralisé pendant les tests")
+    def refuse_gh(command: object, *args: object, **kwargs: object) -> object:
+        first = command[0] if isinstance(command, (list, tuple)) and command else command
+        if str(first) == "gh" or str(first).endswith("/gh"):
+            raise FileNotFoundError("gh est neutralisé pendant les tests")
+        return real_run(command, *args, **kwargs)  # type: ignore[arg-type,call-overload]
 
-    monkeypatch.setattr(token_module.subprocess, "run", refuse)
+    monkeypatch.setattr(token_module.subprocess, "run", refuse_gh)
 
 
 @pytest.fixture(autouse=True)
