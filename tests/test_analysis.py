@@ -477,3 +477,67 @@ def test_a_file_beyond_the_limit_is_counted_apart(tmp_path: Path) -> None:
     assert result.files_seen == 2
     assert result.files_analysed == 1
     assert result.files_too_large == 1
+
+
+# ── Dépendances et tests dans l'analyse complète ─────────────────────────────
+
+
+def test_an_audit_reads_the_declared_dependencies(tmp_path: Path) -> None:
+    build(
+        tmp_path,
+        {
+            "pyproject.toml": '[project]\nname = "x"\ndependencies = ["httpx>=0.27"]\n',
+            "app.py": "import httpx\n",
+        },
+    )
+
+    result = audit_checkout(tmp_path, commit="abc", branch="main")
+
+    assert [item.name for item in result.dependencies] == ["httpx"]
+    assert result.undeclared_imports == ()
+
+
+def test_an_import_nobody_declares_is_flagged_as_a_lead(tmp_path: Path) -> None:
+    """Indicatif, jamais normatif : un paquet s'installe sous un autre nom qu'il s'importe."""
+    build(tmp_path, {"pyproject.toml": '[project]\nname = "x"\n', "app.py": "import httpx\n"})
+
+    result = audit_checkout(tmp_path, commit="abc", branch="main")
+
+    assert result.undeclared_imports == ("httpx",)
+
+
+def test_a_package_named_differently_from_its_import_still_matches(tmp_path: Path) -> None:
+    """« SQLAlchemy » déclaré et « sqlalchemy » importé sont un seul paquet."""
+    build(
+        tmp_path,
+        {
+            "pyproject.toml": '[project]\nname = "x"\ndependencies = ["SQLAlchemy>=2.0"]\n',
+            "app.py": "import sqlalchemy\n",
+        },
+    )
+
+    assert audit_checkout(tmp_path, commit="abc", branch="main").undeclared_imports == ()
+
+
+def test_an_audit_separates_test_files_from_sources(tmp_path: Path) -> None:
+    build(
+        tmp_path,
+        {
+            "src/app.py": "def traiter():\n    pass\n",
+            "tests/test_app.py": "import pytest\n\n\ndef test_traiter():\n    pass\n",
+        },
+    )
+
+    result = audit_checkout(tmp_path, commit="abc", branch="main")
+
+    assert [item.path for item in result.test_modules] == ["tests/test_app.py"]
+    assert [item.path for item in result.source_modules] == ["src/app.py"]
+    assert result.tests.files == 1
+    assert result.tests.functions == 1
+    assert result.tests.frameworks == ("pytest",)
+
+
+def test_a_repository_without_tests_reports_none(tmp_path: Path) -> None:
+    build(tmp_path, {"src/app.py": "a = 1\n"})
+
+    assert audit_checkout(tmp_path, commit="abc", branch="main").tests.exists is False

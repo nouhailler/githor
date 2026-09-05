@@ -31,6 +31,19 @@ class ImportKind(StrEnum):
     """Tout le reste : ce qui doit être installé pour que le code s'exécute."""
 
 
+class DependencyScope(StrEnum):
+    """Rôle d'une dépendance dans le projet qui la déclare."""
+
+    RUNTIME = "runtime"
+    """Nécessaire à l'exécution : son absence casse le programme."""
+
+    DEVELOPMENT = "development"
+    """Nécessaire au développement seul : tests, linters, outillage."""
+
+    OPTIONAL = "optional"
+    """Attachée à un extra : installée seulement si on le demande."""
+
+
 class LineCounts(BaseModel):
     """Décompte de lignes d'un fichier ou d'un ensemble de fichiers.
 
@@ -135,6 +148,9 @@ class ModuleAnalysis(BaseModel):
     has_docstring: bool = False
     """Vrai si le module porte une docstring de tête."""
 
+    is_test: bool = False
+    """Vrai si le chemin du fichier le désigne comme un fichier de test."""
+
     parse_error: str | None = None
     """Motif de l'échec d'analyse syntaxique, ``None`` si tout s'est bien passé."""
 
@@ -167,6 +183,60 @@ class LanguageLines(BaseModel):
     lines: LineCounts = Field(default_factory=LineCounts)
 
 
+class Dependency(BaseModel):
+    """Dépendance déclarée dans un manifeste du dépôt.
+
+    Ce sont les dépendances **déclarées**, non celles réellement installées ni
+    celles réellement importées. L'écart entre les trois est intéressant en
+    lui-même, et le rendre visible suppose de ne pas les confondre.
+    """
+
+    model_config = _FROZEN
+
+    name: str
+    """Nom tel qu'il est écrit dans le manifeste."""
+
+    ecosystem: str
+    """Écosystème dont le nom relève : ``PyPI``, ``npm``, ``crates.io``, ``Go``."""
+
+    scope: DependencyScope = DependencyScope.RUNTIME
+
+    specifier: str | None = None
+    """Contrainte de version, ``None`` si le manifeste n'en pose aucune."""
+
+    source: str
+    """Manifeste qui l'a déclarée : un constat doit citer ce qui le motive."""
+
+    group: str | None = None
+    """Nom de l'extra ou du groupe, quand la dépendance en relève."""
+
+
+class TestSuite(BaseModel):
+    """Ce que le dépôt contient en fait de tests.
+
+    La détection est structurelle : elle repose sur les conventions de nommage
+    des fichiers, et sur l'AST pour les fonctions Python. Rien n'est exécuté —
+    Githor ne lance jamais les tests d'un dépôt qu'il analyse.
+    """
+
+    model_config = _FROZEN
+
+    files: int = 0
+    functions: int = 0
+    """Fonctions de test relevées ; établi pour Python seulement."""
+
+    frameworks: tuple[str, ...] = ()
+    """Cadres de test reconnus, par import ou par dépendance déclarée."""
+
+    directories: tuple[str, ...] = ()
+    """Répertoires de tests trouvés dans l'arborescence."""
+
+    @property
+    def exists(self) -> bool:
+        """Vrai si le dépôt porte au moins un fichier de test."""
+        return self.files > 0
+
+
 class CodeAudit(BaseModel):
     """Résultat complet de l'analyse locale d'un dépôt, à une date donnée."""
 
@@ -190,6 +260,8 @@ class CodeAudit(BaseModel):
 
     modules: tuple[ModuleAnalysis, ...] = ()
     languages: tuple[LanguageLines, ...] = ()
+    dependencies: tuple[Dependency, ...] = ()
+    tests: TestSuite = Field(default_factory=TestSuite)
 
     @property
     def lines(self) -> LineCounts:
@@ -240,6 +312,39 @@ class CodeAudit(BaseModel):
         ranked = sorted(self.functions, key=lambda item: (-item.complexity, item.name))
         return tuple(ranked[:limit])
 
+    @property
+    def test_modules(self) -> tuple[ModuleAnalysis, ...]:
+        """Modules reconnus comme fichiers de test."""
+        return tuple(module for module in self.modules if module.is_test)
+
+    @property
+    def source_modules(self) -> tuple[ModuleAnalysis, ...]:
+        """Modules qui ne sont pas des fichiers de test."""
+        return tuple(module for module in self.modules if not module.is_test)
+
+    def dependencies_in_scope(self, scope: DependencyScope) -> tuple[Dependency, ...]:
+        """Dépendances déclarées pour un rôle donné."""
+        return tuple(item for item in self.dependencies if item.scope is scope)
+
+    @property
+    def undeclared_imports(self) -> tuple[str, ...]:
+        """Modules tiers importés que nul manifeste ne déclare.
+
+        Le rapprochement est **indicatif** et non normatif : un paquet
+        s'installe souvent sous un nom différent de celui qu'il s'importe
+        (``PyYAML`` fournit ``yaml``). Ce qui sort d'ici est une piste à
+        vérifier, jamais un manquement établi — c'est pourquoi aucune règle
+        n'en tire de constat.
+        """
+        declared = {_normalised(item.name) for item in self.dependencies}
+        return tuple(
+            sorted(
+                root
+                for root in self.imports_of_kind(ImportKind.THIRD_PARTY)
+                if _normalised(root) not in declared
+            )
+        )
+
     def imports_of_kind(self, kind: ImportKind) -> tuple[str, ...]:
         """Racines des modules importés d'une origine donnée, dédoublonnées et triées."""
         return tuple(
@@ -252,3 +357,12 @@ class CodeAudit(BaseModel):
                 }
             )
         )
+
+
+def _normalised(name: str) -> str:
+    """Ramène un nom de paquet à une forme comparable.
+
+    Les écosystèmes tolèrent plusieurs graphies du même paquet : PyPI traite
+    ``ruamel.yaml``, ``ruamel-yaml`` et ``Ruamel_YAML`` comme un seul nom.
+    """
+    return name.strip().lower().replace("_", "-").replace(".", "-")

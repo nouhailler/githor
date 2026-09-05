@@ -10,6 +10,7 @@ from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
+from githor.analysis.dependencies import collect_dependencies
 from githor.analysis.languages import language_of
 from githor.analysis.loc import count_lines
 from githor.analysis.python_ast import (
@@ -20,6 +21,7 @@ from githor.analysis.python_ast import (
     has_module_docstring,
     parse_module,
 )
+from githor.analysis.tests import build_test_suite, is_test_path
 from githor.analysis.tree import SourceFile, local_roots, read_text, walk_files
 from githor.logging import get_logger
 from githor.models.code import CodeAudit, LanguageLines, LineCounts, ModuleAnalysis
@@ -67,6 +69,8 @@ def audit_checkout(
             continue
         modules.append(_analyse_file(source, local_roots=roots))
 
+    dependencies = collect_dependencies(root)
+
     return CodeAudit(
         analysed_at=analysed_at or utc_now(),
         commit=commit,
@@ -77,6 +81,8 @@ def audit_checkout(
         files_too_large=too_large,
         modules=tuple(modules),
         languages=_by_language(modules),
+        dependencies=dependencies,
+        tests=build_test_suite(modules, dependencies),
     )
 
 
@@ -85,6 +91,7 @@ def _analyse_file(source: SourceFile, *, local_roots: frozenset[str]) -> ModuleA
     language = language_of(source.path)
     content = read_text(source.path)
     lines = count_lines(content, language)
+    is_test = is_test_path(source.relative)
 
     if not language.analysable:
         return ModuleAnalysis(
@@ -92,6 +99,7 @@ def _analyse_file(source: SourceFile, *, local_roots: frozenset[str]) -> ModuleA
             language=language.name,
             size_bytes=source.size,
             lines=lines,
+            is_test=is_test,
         )
 
     try:
@@ -105,6 +113,7 @@ def _analyse_file(source: SourceFile, *, local_roots: frozenset[str]) -> ModuleA
             language=language.name,
             size_bytes=source.size,
             lines=lines,
+            is_test=is_test,
             parse_error=str(exc),
         )
 
@@ -117,6 +126,7 @@ def _analyse_file(source: SourceFile, *, local_roots: frozenset[str]) -> ModuleA
         classes=collect_classes(tree),
         imports=collect_imports(tree, local_roots=local_roots),
         has_docstring=has_module_docstring(tree),
+        is_test=is_test,
     )
 
 

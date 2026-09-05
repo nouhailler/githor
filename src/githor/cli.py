@@ -40,7 +40,7 @@ from githor.github.repositories import get_repository
 from githor.github.token import find_token, require_token
 from githor.github.user import get_authenticated_login, get_authenticated_user
 from githor.logging import get_logger, setup_logging
-from githor.models.code import CodeAudit, ImportKind
+from githor.models.code import CodeAudit, DependencyScope, ImportKind
 from githor.models.finding import SEVERITY_LABELS, SEVERITY_ORDER, Severity, Status
 from githor.models.repository import Repository
 from githor.reports import build_report, render_report, write_report
@@ -726,6 +726,8 @@ def _print_audit_detail(full_name: str, result: CodeAudit) -> None:
         "Complexité",
         "—" if average is None else f"moyenne {average}, maximum {result.max_complexity}",
     )
+    summary.add_row("Tests", _tests_summary(result))
+    summary.add_row("Dépendances", _dependencies_summary(result))
     console.print(summary)
 
     if result.languages:
@@ -746,9 +748,21 @@ def _print_audit_detail(full_name: str, result: CodeAudit) -> None:
             table.add_row(str(function.complexity), function.name, placement.get(function.name, ""))
         console.print(table)
 
+    if result.dependencies:
+        console.print()
+        console.print(_dependencies_table(result))
+
     third_party = result.imports_of_kind(ImportKind.THIRD_PARTY)
     if third_party:
         console.print(f"\n[dim]Imports tierce partie :[/dim] {', '.join(third_party)}")
+
+    undeclared = result.undeclared_imports
+    if undeclared:
+        # Piste à vérifier, jamais un manquement établi : un paquet s'installe
+        # souvent sous un autre nom que celui sous lequel il s'importe.
+        console.print(
+            f"[dim]Importés sans être déclarés (à vérifier) :[/dim] {', '.join(undeclared)}"
+        )
 
     errors = result.parse_errors
     if errors:
@@ -765,6 +779,62 @@ def _audit_files_summary(result: CodeAudit) -> str:
     if result.files_too_large:
         parts.append(f"{result.files_too_large} trop gros")
     return ", ".join(parts)
+
+
+def _tests_summary(result: CodeAudit) -> str:
+    """Décrit la suite de tests trouvée, ou dit qu'il n'y en a pas."""
+    tests = result.tests
+    if not tests.exists:
+        return "[yellow]aucun fichier de test[/yellow]"
+
+    parts = [f"{tests.files} fichier(s)"]
+    if tests.functions:
+        parts.append(f"{tests.functions} fonction(s)")
+    if tests.frameworks:
+        parts.append(", ".join(tests.frameworks))
+    return " · ".join(parts)
+
+
+def _dependencies_summary(result: CodeAudit) -> str:
+    """Compte les dépendances déclarées par rôle."""
+    if not result.dependencies:
+        return "aucune déclarée"
+
+    counts = [
+        (label, len(result.dependencies_in_scope(scope)))
+        for scope, label in (
+            (DependencyScope.RUNTIME, "exécution"),
+            (DependencyScope.DEVELOPMENT, "développement"),
+            (DependencyScope.OPTIONAL, "optionnelle(s)"),
+        )
+    ]
+    return ", ".join(f"{count} {label}" for label, count in counts if count)
+
+
+def _dependencies_table(result: CodeAudit) -> Table:
+    """Dépendances déclarées, avec le manifeste qui les déclare."""
+    table = Table(title="Dépendances déclarées", title_justify="left")
+    table.add_column("Paquet")
+    table.add_column("Contrainte")
+    table.add_column("Rôle")
+    table.add_column("Écosystème", style="dim")
+    table.add_column("Déclarée dans", style="dim")
+
+    scopes = {
+        DependencyScope.RUNTIME: "exécution",
+        DependencyScope.DEVELOPMENT: "développement",
+        DependencyScope.OPTIONAL: "optionnelle",
+    }
+
+    for item in result.dependencies:
+        table.add_row(
+            item.name,
+            item.specifier or "—",
+            scopes[item.scope],
+            item.ecosystem,
+            item.source,
+        )
+    return table
 
 
 def _languages_table(result: CodeAudit) -> Table:
@@ -794,7 +864,8 @@ def _audit_table(results: Sequence[tuple[str, CodeAudit]]) -> Table:
     table.add_column("Langage")
     table.add_column("Fonctions", justify="right")
     table.add_column("Compl. moy.", justify="right")
-    table.add_column("Compl. max", justify="right")
+    table.add_column("Tests", justify="right")
+    table.add_column("Dépend.", justify="right")
 
     for full_name, result in results:
         average = result.average_complexity
@@ -805,7 +876,8 @@ def _audit_table(results: Sequence[tuple[str, CodeAudit]]) -> Table:
             result.languages[0].language if result.languages else "—",
             str(len(result.functions)),
             "—" if average is None else f"{average}",
-            str(result.max_complexity) if result.functions else "—",
+            str(result.tests.files) if result.tests.exists else "[yellow]0[/yellow]",
+            str(len(result.dependencies)),
         )
     return table
 

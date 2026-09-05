@@ -11,6 +11,7 @@ l'AST de l'interpréteur et non d'une heuristique.
 """
 
 from githor.analysis.audit import audit_checkout
+from githor.analysis.dependencies import collect_dependencies, parse_requirement
 from githor.analysis.languages import LANGUAGES, Language, is_analysable, language_of
 from githor.analysis.loc import count_lines
 from githor.analysis.python_ast import (
@@ -23,6 +24,7 @@ from githor.analysis.python_ast import (
     complexity_of,
     parse_module,
 )
+from githor.analysis.tests import build_test_suite, find_test_directories, is_test_path
 from githor.analysis.tree import EXCLUDED_DIRECTORIES, SourceFile, local_roots, walk_files
 
 __all__ = [
@@ -33,15 +35,20 @@ __all__ = [
     "SourceFile",
     "SyntaxErrorInModule",
     "audit_checkout",
+    "build_test_suite",
     "classify_import",
     "collect_classes",
     "collect_functions",
+    "collect_dependencies",
     "collect_imports",
     "complexity_of",
     "count_lines",
+    "find_test_directories",
     "is_analysable",
+    "is_test_path",
     "language_of",
     "local_roots",
     "parse_module",
+    "parse_requirement",
     "walk_files",
 ]

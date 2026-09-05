@@ -1360,3 +1360,46 @@ def test_audit_without_a_database_says_what_to_run(authenticated: None, tmp_path
 def test_audit_does_not_call_github(database_with_repository: Path, remote_with_code: Path) -> None:
     """Aucune réponse HTTP n'est enregistrée : une vraie requête ferait échouer le test."""
     assert runner.invoke(cli.app, ["audit"]).exit_code == 0
+
+
+def test_audit_reports_declared_dependencies(
+    database_with_repository: Path, remote_with_code: Path
+) -> None:
+    (remote_with_code / "pyproject.toml").write_text(
+        '[project]\nname = "depot"\ndependencies = ["httpx>=0.27"]\n'
+        '[project.optional-dependencies]\ndev = ["pytest>=8"]\n',
+        encoding="utf-8",
+    )
+    git("add", ".", cwd=remote_with_code)
+    git("commit", "--quiet", "-m", "Manifeste", cwd=remote_with_code)
+
+    output = plain(runner.invoke(cli.app, ["audit", "depot"]).output)
+
+    assert "Dépendances déclarées" in output
+    assert "httpx" in output
+    assert "pyproject.toml" in output
+    assert "1 exécution, 1 optionnelle(s)" in output
+
+
+def test_audit_reports_the_test_suite(
+    database_with_repository: Path, remote_with_code: Path
+) -> None:
+    tests_dir = remote_with_code / "tests"
+    tests_dir.mkdir()
+    (tests_dir / "test_app.py").write_text(
+        "import pytest\n\n\ndef test_traiter():\n    pass\n", encoding="utf-8"
+    )
+    git("add", ".", cwd=remote_with_code)
+    git("commit", "--quiet", "-m", "Des tests", cwd=remote_with_code)
+
+    output = plain(runner.invoke(cli.app, ["audit", "depot"]).output)
+
+    assert "1 fichier(s) · 1 fonction(s) · pytest" in output
+
+
+def test_audit_says_when_a_repository_has_no_tests(
+    database_with_repository: Path, remote_with_code: Path
+) -> None:
+    output = plain(runner.invoke(cli.app, ["audit", "depot"]).output)
+
+    assert "aucun fichier de test" in output
