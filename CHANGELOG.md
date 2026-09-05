@@ -8,10 +8,13 @@ projet respecte le [versionnement sémantique](https://semver.org/lang/fr/).
 Les étapes numérotées renvoient au plan de développement de la V0.1 : les
 treize sont franchies.
 
-## [Non publié]
+## [0.1.0] — 2026-09-05
 
-La V0.1 remplit ses critères d'acceptation et le cahier des charges n'a plus de
-manque connu. Reste à figer la **0.1.0**.
+Première version publiée. Githor liste les dépôts d'un compte, en prend des
+snapshots datés, en tire des constats déterministes, et sait les exporter comme
+les rapporter — le tout en lecture seule, hors ligne une fois la collecte faite,
+et sans jamais écrire sur GitHub. Les critères d'acceptation du cahier des
+charges sont remplis, et celui-ci n'a plus de manque connu.
 
 ### Ajouté
 

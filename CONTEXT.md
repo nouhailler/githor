@@ -147,8 +147,9 @@ doit jamais produire autre chose que le fichier attendu.
 
 ## État d'avancement
 
-Les treize étapes du plan sont franchies, et le cahier des charges n'a plus de
-manque connu. Le détail est dans le [CHANGELOG](CHANGELOG.md).
+La **0.1.0** est publiée : les treize étapes du plan sont franchies et le cahier
+des charges n'a plus de manque connu. Le détail est dans le
+[CHANGELOG](CHANGELOG.md) ; la suite est la V0.2, décrite plus bas.
 
 ## Conventions
 
