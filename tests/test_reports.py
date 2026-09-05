@@ -13,12 +13,22 @@ from githor import __version__
 from githor.collectors.repositories import build_snapshot
 from githor.errors import StorageError
 from githor.models.activity import Commit
+from githor.models.code import (
+    CodeAudit,
+    Dependency,
+    FunctionAnalysis,
+    Import,
+    ImportKind,
+    LineCounts,
+    ModuleAnalysis,
+)
 from githor.models.finding import Finding, Severity, Status
 from githor.models.issue import Issue
 from githor.models.release import Release
 from githor.models.repository import Repository
 from githor.models.snapshot import Language, RepositoryFile
 from githor.reports import Report, build_report, render_report, report_filename, write_report
+from githor.storage.code import save_audit
 from githor.storage.database import Database
 from githor.storage.findings import save_findings
 from githor.storage.repositories import (
@@ -321,3 +331,103 @@ def test_an_unwritable_destination_raises_a_storage_error(
 
     with pytest.raises(StorageError, match="Rapport impossible"):
         write_report(report_of(populated, "Architecturor"), obstacle / "rapport.md")
+
+
+# ── Section « Code » ─────────────────────────────────────────────────────────
+
+
+def audited(database: Database, name: str = "Architecturor") -> Database:
+    """Ajoute un audit de code au dépôt désigné."""
+    with database.session() as session:
+        row = find_repository_by_name(session, name)
+        assert row is not None
+        save_audit(
+            session,
+            row.id,
+            CodeAudit(
+                analysed_at=NOW,
+                commit="0123456789abcdef",
+                branch="main",
+                files_seen=3,
+                files_analysed=2,
+                files_binary=1,
+                modules=(
+                    ModuleAnalysis(
+                        path="src/app.py",
+                        language="Python",
+                        lines=LineCounts(total=10, code=7, comment=2, blank=1),
+                        functions=(FunctionAnalysis(name="traiter", line=3, complexity=5),),
+                        imports=(Import(module="httpx", kind=ImportKind.THIRD_PARTY, line=1),),
+                    ),
+                    ModuleAnalysis(
+                        path="tests/test_app.py",
+                        language="Python",
+                        lines=LineCounts(total=4, code=3, comment=0, blank=1),
+                        functions=(FunctionAnalysis(name="test_traiter", line=1),),
+                        is_test=True,
+                    ),
+                ),
+                dependencies=(
+                    Dependency(
+                        name="httpx",
+                        ecosystem="PyPI",
+                        specifier=">=0.27",
+                        source="pyproject.toml",
+                    ),
+                ),
+            ),
+        )
+    return database
+
+
+def test_a_report_without_an_audit_says_what_to_run(populated: Database) -> None:
+    document = rendered(populated)
+
+    assert "## Code" in document
+    assert "githor audit Architecturor" in document
+
+
+def test_a_report_carries_the_latest_audit(populated: Database) -> None:
+    document = rendered(audited(populated))
+
+    assert "commit `0123456`" in document
+    assert "| Lines of code | 10 |" in document
+    assert "| Functions | 2 |" in document
+    assert "| Test files | 1 |" in document
+
+
+def test_the_code_section_names_the_analysed_commit(populated: Database) -> None:
+    """Une mesure indatable ne se compare à rien."""
+    report = report_of(audited(populated), "Architecturor")
+
+    assert report.code is not None
+    assert report.code.commit == "0123456789abcdef"
+    assert report.audits == 1
+
+
+def test_the_code_section_cites_the_file_of_a_complex_function(populated: Database) -> None:
+    document = rendered(audited(populated))
+
+    assert "`src/app.py`:3" in document
+
+
+def test_the_code_section_cites_the_manifest_of_a_dependency(populated: Database) -> None:
+    document = rendered(audited(populated))
+
+    assert "| httpx | >=0.27 | exécution | PyPI | `pyproject.toml` |" in document
+
+
+def test_skipped_files_are_reported_in_the_code_section(populated: Database) -> None:
+    """Un fichier écarté en silence fausserait tous les décomptes."""
+    document = rendered(audited(populated))
+
+    assert "Fichiers écartés : 1 binaire(s)." in document
+
+
+def test_an_audit_is_shown_even_without_a_snapshot(populated: Database) -> None:
+    """L'audit se lit sur un clone local : il ne suppose aucun scan préalable."""
+    document = rendered(audited(populated, "Vide"), "Vide")
+
+    assert "Aucun snapshot enregistré" in document
+    assert "## Code" in document
+    assert "| Lines of code | 10 |" in document

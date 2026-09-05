@@ -47,6 +47,7 @@ from githor.reports import build_report, render_report, write_report
 from githor.rules.base import RuleContext
 from githor.rules.catalog import CATEGORIES, CATEGORY_LABELS, rule_labels
 from githor.rules.engine import evaluate, open_findings
+from githor.storage.code import count_audits, save_audit
 from githor.storage.database import Database
 from githor.storage.findings import latest_findings, save_findings
 from githor.storage.repositories import (
@@ -647,6 +648,13 @@ def audit(
             help="N'interroge pas l'origine : analyse les miroirs déjà présents.",
         ),
     ] = False,
+    save: Annotated[
+        bool,
+        typer.Option(
+            "--save/--no-save",
+            help="Enregistre l'analyse en base. Activé par défaut.",
+        ),
+    ] = True,
 ) -> None:
     """Analyse le code source des dépôts, localement.
 
@@ -654,6 +662,9 @@ def audit(
     compte les lignes de tous les langages reconnus, et n'établit structure,
     complexité et imports que pour Python — où ils viennent de l'AST de
     l'interpréteur, non d'une heuristique.
+
+    Chaque exécution **ajoute** un audit : les analyses précédentes sont
+    conservées, comme les snapshots, afin de pouvoir suivre l'évolution du code.
 
     Comme le reste des commandes locales, elle relit la base et n'appelle pas
     l'API GitHub : aucun quota n'est consommé.
@@ -665,6 +676,9 @@ def audit(
     detailed = len(rows) == 1
     results: list[tuple[str, CodeAudit]] = []
     failed = 0
+
+    database = open_database(config)
+    database.create_schema()
 
     for row in rows:
         try:
@@ -683,10 +697,25 @@ def audit(
             )
         results.append((row.full_name, result))
 
+        stored = 0
+        if save:
+            with database.session() as session:
+                save_audit(session, row.id, result)
+                stored = count_audits(session, row.id)
+
         if detailed:
-            _print_audit_detail(row.full_name, result)
+            _print_audit_detail(row.full_name, result, audits=stored)
+        else:
+            console.print(
+                f"[green]✓[/green] {row.full_name} [dim]({result.files_analysed} fichiers · "
+                f"{result.lines.code} lignes de code)[/dim]",
+                highlight=False,
+            )
+
+    database.close()
 
     if not detailed and results:
+        console.print()
         console.print(_audit_table(results))
 
     console.print(
@@ -694,15 +723,26 @@ def audit(
         f"{sum(item.files_analysed for _, item in results)} fichier(s) lus.",
         highlight=False,
     )
+    if save and results:
+        console.print(f"Base : {config.storage.database}", highlight=False)
+    elif results:
+        console.print("[dim]--no-save : rien n'a été écrit en base.[/dim]")
     if failed:
         console.print(f"[red]{failed} dépôt(s) en échec.[/red]", highlight=False)
         raise typer.Exit(code=1)
 
 
-def _print_audit_detail(full_name: str, result: CodeAudit) -> None:
-    """Détaille l'analyse d'un seul dépôt."""
+def _print_audit_detail(full_name: str, result: CodeAudit, *, audits: int = 0) -> None:
+    """Détaille l'analyse d'un seul dépôt.
+
+    Args:
+        full_name: nom complet du dépôt.
+        result: analyse à rendre.
+        audits: nombre d'audits conservés, ``0`` si rien n'a été enregistré.
+    """
+    kept = f" · audit {audits}" if audits else ""
     console.print(
-        f"[bold]{full_name}[/bold] [dim]{result.branch} · {result.commit[:7]}[/dim]\n",
+        f"[bold]{full_name}[/bold] [dim]{result.branch} · {result.commit[:7]}{kept}[/dim]\n",
         highlight=False,
     )
 

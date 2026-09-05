@@ -407,7 +407,7 @@ def test_db_init_creates_the_database(monkeypatch: pytest.MonkeyPatch, tmp_path:
     assert result.exit_code == 0
     assert (tmp_path / "data" / "githor.db").exists()
     assert "Base créée" in output
-    assert "8 table(s)" in output
+    assert "14 table(s)" in output
     assert "repository_snapshots" in output
 
 
@@ -1403,3 +1403,57 @@ def test_audit_says_when_a_repository_has_no_tests(
     output = plain(runner.invoke(cli.app, ["audit", "depot"]).output)
 
     assert "aucun fichier de test" in output
+
+
+def test_audit_persists_its_findings(
+    database_with_repository: Path, remote_with_code: Path
+) -> None:
+    result = runner.invoke(cli.app, ["audit", "depot"])
+
+    with sqlite3.connect(database_with_repository / "data" / "githor.db") as connection:
+        audits = connection.execute("SELECT COUNT(*) FROM code_audits").fetchone()[0]
+        modules = connection.execute("SELECT COUNT(*) FROM code_modules").fetchone()[0]
+        functions = connection.execute("SELECT COUNT(*) FROM code_functions").fetchone()[0]
+
+    assert result.exit_code == 0
+    assert audits == 1
+    assert modules > 0
+    assert functions > 0
+    assert "audit 1" in plain(result.output)
+
+
+def test_a_second_audit_is_added_not_replaced(
+    database_with_repository: Path, remote_with_code: Path
+) -> None:
+    """Deux analyses successives se comparent : elles ne s'écrasent pas."""
+    runner.invoke(cli.app, ["audit", "depot"])
+    result = runner.invoke(cli.app, ["audit", "depot"])
+
+    with sqlite3.connect(database_with_repository / "data" / "githor.db") as connection:
+        audits = connection.execute("SELECT COUNT(*) FROM code_audits").fetchone()[0]
+
+    assert audits == 2
+    assert "audit 2" in plain(result.output)
+
+
+def test_no_save_writes_nothing(database_with_repository: Path, remote_with_code: Path) -> None:
+    result = runner.invoke(cli.app, ["audit", "depot", "--no-save"])
+
+    with sqlite3.connect(database_with_repository / "data" / "githor.db") as connection:
+        audits = connection.execute("SELECT COUNT(*) FROM code_audits").fetchone()[0]
+
+    assert result.exit_code == 0
+    assert audits == 0
+    assert "rien n'a été écrit en base" in plain(result.output)
+
+
+def test_a_report_carries_the_audit_after_it_ran(
+    database_with_repository: Path, remote_with_code: Path
+) -> None:
+    """L'audit et le rapport doivent décrire le même dépôt sans se contredire."""
+    runner.invoke(cli.app, ["audit", "depot"])
+
+    output = runner.invoke(cli.app, ["report", "depot"]).output
+
+    assert "## Code" in output
+    assert "| Functions | 1 |" in output

@@ -20,6 +20,7 @@ from githor.errors import StorageError
 from githor.exporters.dataset import RepositoryExport, build_repository_export
 from githor.logging import get_logger
 from githor.reports.markdown import render_report
+from githor.storage.code import AuditMetrics, audit_metrics, count_audits, latest_audit
 from githor.storage.repositories import count_snapshots, first_snapshot
 from githor.storage.tables import RepositoryRow
 from githor.utils.dates import utc_now
@@ -33,7 +34,7 @@ EXTENSION = ".md"
 class Report(BaseModel):
     """Tout ce qu'un rapport individuel donne à lire d'un repository."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
 
     githor_version: str
     generated_at: datetime
@@ -45,6 +46,17 @@ class Report(BaseModel):
     """Nombre de mesures conservées : depuis quand ce dépôt est suivi."""
 
     first_snapshot_at: datetime | None = None
+
+    code: AuditMetrics | None = None
+    """Dernier audit de code, ``None`` si le dépôt n'a jamais été analysé.
+
+    L'audit est **indépendant du snapshot** : il se lit sur un clone local et
+    peut donc manquer là où un snapshot existe, ou l'inverse. Le rapport dit
+    l'un ou l'autre selon ce qui est enregistré, sans jamais en supposer un.
+    """
+
+    audits: int = 0
+    """Nombre d'audits de code conservés."""
 
 
 def build_report(
@@ -58,12 +70,15 @@ def build_report(
         generated_at: date de génération ; maintenant par défaut.
     """
     oldest = first_snapshot(session, row.id)
+    audit = latest_audit(session, row.id)
     report = Report(
         githor_version=__version__,
         generated_at=generated_at or utc_now(),
         repository=build_repository_export(session, row),
         snapshots=count_snapshots(session, row.id),
         first_snapshot_at=oldest.collected_at if oldest else None,
+        code=audit_metrics(session, audit) if audit is not None else None,
+        audits=count_audits(session, row.id),
     )
     logger.debug("Rapport construit : %s (%s snapshot(s)).", row.full_name, report.snapshots)
     return report

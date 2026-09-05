@@ -39,6 +39,12 @@ from githor.storage.tables import (
 )
 
 EXPECTED_TABLES = [
+    "code_audits",
+    "code_classes",
+    "code_dependencies",
+    "code_functions",
+    "code_imports",
+    "code_modules",
     "commits",
     "findings",
     "issues",
@@ -48,6 +54,12 @@ EXPECTED_TABLES = [
     "repository_files",
     "repository_snapshots",
 ]
+"""Tables attendues dans une base neuve.
+
+La V0.2 n'ajoute que des tables : ``create_all`` sait les créer dans une base
+existante, là où elle serait incapable d'ajouter une colonne à une table déjà
+présente.
+"""
 
 
 @pytest.fixture

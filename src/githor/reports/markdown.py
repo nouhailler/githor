@@ -12,12 +12,14 @@ vérifié ce jour-là, et non ce que Githor saurait vérifier aujourd'hui.
 from typing import TYPE_CHECKING
 
 from githor.exporters.dataset import FindingExport, ReleaseExport, RepositoryExport
+from githor.models.code import DependencyScope
 from githor.models.finding import SEVERITY_ORDER, Status
 from githor.rules.catalog import CATEGORIES, CATEGORY_LABELS, rule_labels
 from githor.utils.markdown import ABSENT, escape_cell, format_moment, severity_label
 
 if TYPE_CHECKING:  # pragma: no cover — importé seulement pour le typage
     from githor.reports import Report
+    from githor.storage.code import AuditMetrics
 
 PRESENT_MARK = "✓"
 MISSING_MARK = "✗"
@@ -38,10 +40,13 @@ def render_report(report: "Report") -> str:
             f"lancez `githor scan {repository.name}` pour en produire un.",
             "",
         ]
+        # L'audit ne dépend pas du snapshot : s'il existe, il a sa place ici.
+        lines += _code(report)
         return "\n".join(lines).rstrip() + "\n"
 
     lines += _overview(repository)
     lines += _languages(repository)
+    lines += _code(report)
     lines += _checks(repository)
     lines += _releases(repository)
     lines += _findings(repository)
@@ -218,6 +223,131 @@ def _findings(repository: RepositoryExport) -> list[str]:
             lines.append(f"- {escape_cell(finding.message)} (`{finding.rule}`){recommendation}")
         lines.append("")
     return lines
+
+
+def _code(report: "Report") -> list[str]:
+    """Ce que l'analyse locale a lu du code, si elle a eu lieu.
+
+    Cette section est tirée de l'audit et non du snapshot : les deux sont des
+    mesures distinctes, prises par des chemins différents, et l'une peut exister
+    sans l'autre.
+    """
+    code = report.code
+    if code is None:
+        return [
+            "## Code",
+            "",
+            f"Aucune analyse de code enregistrée : lancez `githor audit "
+            f"{escape_cell(report.repository.name)}` pour en produire une.",
+            "",
+        ]
+
+    lines = [
+        "## Code",
+        "",
+        f"*D'après l'audit du {format_moment(code.analysed_at)}, "
+        f"commit `{escape_cell(code.short_commit)}` sur `{escape_cell(code.branch)}`.*",
+        "",
+        "| Metric | Value |",
+        "|---|---:|",
+        f"| Files analysed | {code.files_analysed} |",
+        f"| Lines of code | {code.lines.code} |",
+        f"| Comment lines | {code.lines.comment} |",
+        f"| Blank lines | {code.lines.blank} |",
+        f"| Comment ratio | "
+        f"{ABSENT if code.lines.comment_ratio is None else f'{code.lines.comment_ratio} %'} |",
+        f"| Functions | {code.function_count} |",
+        f"| Classes | {code.class_count} |",
+        f"| Average complexity | {code.average_complexity or ABSENT} |",
+        f"| Max complexity | {code.max_complexity or ABSENT} |",
+        f"| Test files | {code.tests.files} |",
+        f"| Test functions | {code.tests.functions} |",
+        f"| Dependencies | {len(code.dependencies)} |",
+        "",
+    ]
+
+    if code.files_binary or code.files_too_large or code.parse_errors:
+        skipped = []
+        if code.files_binary:
+            skipped.append(f"{code.files_binary} binaire(s)")
+        if code.files_too_large:
+            skipped.append(f"{code.files_too_large} trop volumineux")
+        if code.parse_errors:
+            skipped.append(f"{code.parse_errors} non analysable(s)")
+        lines += [f"Fichiers écartés : {', '.join(skipped)}.", ""]
+
+    lines += _code_languages(code)
+    lines += _most_complex(code)
+    lines += _dependencies(code)
+    return lines
+
+
+def _code_languages(code: "AuditMetrics") -> list[str]:
+    """Répartition mesurée sur le code présent, artefacts écartés.
+
+    À distinguer de la section « Langages », qui reprend le calcul de GitHub :
+    les deux peuvent diverger, et c'est l'intérêt de les donner toutes les deux.
+    """
+    if not code.languages:
+        return []
+
+    lines = [
+        "### Langages du code analysé",
+        "",
+        "| Language | Files | Code | Comment |",
+        "|---|---:|---:|---:|",
+    ]
+    lines += [
+        f"| {escape_cell(item.language)} | {item.files} | "
+        f"{item.lines.code} | {item.lines.comment} |"
+        for item in code.languages
+    ]
+    return [*lines, ""]
+
+
+def _most_complex(code: "AuditMetrics") -> list[str]:
+    """Fonctions les plus complexes, citées avec leur fichier et leur ligne."""
+    if not code.most_complex or code.max_complexity <= 1:
+        return []
+
+    lines = [
+        "### Fonctions les plus complexes",
+        "",
+        "| Complexity | Function | File |",
+        "|---:|---|---|",
+    ]
+    lines += [
+        f"| {item.complexity} | `{escape_cell(item.name)}` | "
+        f"`{escape_cell(item.path)}`:{item.line} |"
+        for item in code.most_complex
+    ]
+    return [*lines, ""]
+
+
+def _dependencies(code: "AuditMetrics") -> list[str]:
+    """Dépendances déclarées, avec le manifeste qui les déclare."""
+    if not code.dependencies:
+        return []
+
+    labels = {
+        DependencyScope.RUNTIME: "exécution",
+        DependencyScope.DEVELOPMENT: "développement",
+        DependencyScope.OPTIONAL: "optionnelle",
+    }
+
+    lines = [
+        "### Dépendances déclarées",
+        "",
+        "| Package | Constraint | Scope | Ecosystem | Declared in |",
+        "|---|---|---|---|---|",
+    ]
+    lines += [
+        f"| {escape_cell(item.name)} | {escape_cell(item.specifier or ABSENT)} | "
+        f"{labels[item.scope]} | {escape_cell(item.ecosystem)} | "
+        f"`{escape_cell(item.source)}` |"
+        for item in code.dependencies
+    ]
+    return [*lines, ""]
 
 
 def _history(report: "Report") -> list[str]:

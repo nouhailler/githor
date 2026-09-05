@@ -9,6 +9,23 @@ Deux principes gouvernent ce schéma :
   et fichiers pendent du snapshot, pas du repository, afin que leur évolution
   reste lisible. Commits, releases et issues pendent du repository : ce sont
   des faits datés, qui ne se réécrivent pas d'un scan à l'autre.
+
+L'analyse de code de la V0.2 suit la même règle : ``code_audits`` est une mesure
+datée de plus, et tout ce qui en découle en pend. Elle n'ajoute **que des tables
+neuves** et ne touche à aucune colonne existante — c'est la seule évolution que
+``create_all`` sache appliquer à une base déjà créée, et donc la seule possible
+tant qu'aucun outil de migration n'est en place.
+
+L'audit pend du repository et non du snapshot : il se lit sur un clone local et
+n'exige aucun appel à GitHub. L'y rattacher obligerait à scanner avant
+d'analyser, alors que rien ne le demande.
+
+Ce qui est écrit ici, ce sont des **faits** : un module, une fonction, un
+import, une dépendance déclarée. Aucune métrique agrégée n'est stockée — elles
+se recalculent à la lecture, faute de quoi un chiffre finirait par diverger de
+sa source. Les seuls décomptes conservés sont ceux dont rien ne porte trace
+ailleurs : les fichiers binaires et les fichiers trop gros n'ont pas de ligne à
+eux, et ne pourraient donc pas être recomptés.
 """
 
 from datetime import UTC, datetime
@@ -95,6 +112,9 @@ class RepositoryRow(Base):
         back_populates="repository", cascade="all, delete-orphan", passive_deletes=True
     )
     issues: Mapped[list["IssueRow"]] = relationship(
+        back_populates="repository", cascade="all, delete-orphan", passive_deletes=True
+    )
+    code_audits: Mapped[list["CodeAuditRow"]] = relationship(
         back_populates="repository", cascade="all, delete-orphan", passive_deletes=True
     )
 
@@ -263,3 +283,173 @@ class FindingRow(Base):
 
     message: Mapped[str] = mapped_column(Text)
     recommendation: Mapped[str | None] = mapped_column(Text)
+
+
+class CodeAuditRow(Base):
+    """Analyse locale du code d'un repository, à une date et sur un commit donnés.
+
+    Comme un snapshot, un audit s'**ajoute** : deux analyses successives se
+    comparent, elles ne se remplacent pas.
+    """
+
+    __tablename__ = "code_audits"
+    __table_args__ = (Index("ix_code_audits_repository_analysed", "repository_id", "analysed_at"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    repository_id: Mapped[int] = mapped_column(
+        ForeignKey("repositories.id", ondelete="CASCADE"), index=True
+    )
+
+    analysed_at: Mapped[datetime] = mapped_column(UTCDateTime, index=True)
+    commit: Mapped[str] = mapped_column(String(40), index=True)
+    """SHA analysé : sans lui, la mesure ne serait rattachable à aucun état."""
+
+    branch: Mapped[str] = mapped_column(String(255))
+
+    files_seen: Mapped[int] = mapped_column(Integer, default=0)
+    files_binary: Mapped[int] = mapped_column(Integer, default=0)
+    files_too_large: Mapped[int] = mapped_column(Integer, default=0)
+    """Fichiers écartés, conservés ici faute d'avoir une ligne à eux."""
+
+    repository: Mapped[RepositoryRow] = relationship(back_populates="code_audits")
+    modules: Mapped[list["CodeModuleRow"]] = relationship(
+        back_populates="audit", cascade="all, delete-orphan", passive_deletes=True
+    )
+    dependencies: Mapped[list["CodeDependencyRow"]] = relationship(
+        back_populates="audit", cascade="all, delete-orphan", passive_deletes=True
+    )
+
+
+class CodeModuleRow(Base):
+    """Fichier analysé lors d'un audit."""
+
+    __tablename__ = "code_modules"
+    __table_args__ = (
+        UniqueConstraint("audit_id", "path", name="uq_module_per_audit"),
+        Index("ix_code_modules_audit_language", "audit_id", "language"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    audit_id: Mapped[int] = mapped_column(
+        ForeignKey("code_audits.id", ondelete="CASCADE"), index=True
+    )
+
+    path: Mapped[str] = mapped_column(String(1024), index=True)
+    language: Mapped[str] = mapped_column(String(64), index=True)
+    size_bytes: Mapped[int] = mapped_column(Integer, default=0)
+
+    lines_total: Mapped[int] = mapped_column(Integer, default=0)
+    lines_code: Mapped[int] = mapped_column(Integer, default=0)
+    lines_comment: Mapped[int] = mapped_column(Integer, default=0)
+    lines_blank: Mapped[int] = mapped_column(Integer, default=0)
+
+    is_test: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    has_docstring: Mapped[bool] = mapped_column(Boolean, default=False)
+    parse_error: Mapped[str | None] = mapped_column(Text)
+    """Motif de l'échec d'analyse syntaxique ; nul quand le fichier a été compris."""
+
+    audit: Mapped[CodeAuditRow] = relationship(back_populates="modules")
+    functions: Mapped[list["CodeFunctionRow"]] = relationship(
+        back_populates="module", cascade="all, delete-orphan", passive_deletes=True
+    )
+    classes: Mapped[list["CodeClassRow"]] = relationship(
+        back_populates="module", cascade="all, delete-orphan", passive_deletes=True
+    )
+    imports: Mapped[list["CodeImportRow"]] = relationship(
+        back_populates="module", cascade="all, delete-orphan", passive_deletes=True
+    )
+
+
+class CodeFunctionRow(Base):
+    """Fonction ou méthode relevée dans un module."""
+
+    __tablename__ = "code_functions"
+    __table_args__ = (Index("ix_code_functions_module_complexity", "module_id", "complexity"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    module_id: Mapped[int] = mapped_column(
+        ForeignKey("code_modules.id", ondelete="CASCADE"), index=True
+    )
+
+    name: Mapped[str] = mapped_column(String(512), index=True)
+    """Nom qualifié dans le module : ``Classe.méthode`` pour une méthode."""
+
+    line: Mapped[int] = mapped_column(Integer, default=0)
+    complexity: Mapped[int] = mapped_column(Integer, default=1, index=True)
+    arguments: Mapped[int] = mapped_column(Integer, default=0)
+    is_async: Mapped[bool] = mapped_column(Boolean, default=False)
+    has_docstring: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    module: Mapped[CodeModuleRow] = relationship(back_populates="functions")
+
+
+class CodeClassRow(Base):
+    """Classe relevée dans un module."""
+
+    __tablename__ = "code_classes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    module_id: Mapped[int] = mapped_column(
+        ForeignKey("code_modules.id", ondelete="CASCADE"), index=True
+    )
+
+    name: Mapped[str] = mapped_column(String(512), index=True)
+    line: Mapped[int] = mapped_column(Integer, default=0)
+    methods: Mapped[int] = mapped_column(Integer, default=0)
+    has_docstring: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    module: Mapped[CodeModuleRow] = relationship(back_populates="classes")
+
+
+class CodeImportRow(Base):
+    """Import relevé dans un module."""
+
+    __tablename__ = "code_imports"
+    __table_args__ = (Index("ix_code_imports_module_kind", "module_id", "kind"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    module_id: Mapped[int] = mapped_column(
+        ForeignKey("code_modules.id", ondelete="CASCADE"), index=True
+    )
+
+    module_name: Mapped[str] = mapped_column(String(512), index=True)
+    """Module importé, en notation pointée."""
+
+    root: Mapped[str] = mapped_column(String(255), index=True)
+    """Premier segment : ce qui, pour une dépendance, s'installe."""
+
+    kind: Mapped[str] = mapped_column(String(16), index=True)
+    line: Mapped[int] = mapped_column(Integer, default=0)
+
+    module: Mapped[CodeModuleRow] = relationship(back_populates="imports")
+
+
+class CodeDependencyRow(Base):
+    """Dépendance déclarée dans un manifeste du dépôt.
+
+    Déclarée, et non installée ni importée : les trois sont distinctes, et
+    c'est leur écart qui renseigne.
+    """
+
+    __tablename__ = "code_dependencies"
+    __table_args__ = (
+        UniqueConstraint(
+            "audit_id", "ecosystem", "name", "scope", "source", name="uq_dependency_per_audit"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    audit_id: Mapped[int] = mapped_column(
+        ForeignKey("code_audits.id", ondelete="CASCADE"), index=True
+    )
+
+    name: Mapped[str] = mapped_column(String(255), index=True)
+    ecosystem: Mapped[str] = mapped_column(String(32), index=True)
+    scope: Mapped[str] = mapped_column(String(16), index=True)
+    specifier: Mapped[str | None] = mapped_column(String(255))
+    source: Mapped[str] = mapped_column(String(512))
+    """Manifeste qui l'a déclarée."""
+
+    group: Mapped[str | None] = mapped_column(String(128))
+
+    audit: Mapped[CodeAuditRow] = relationship(back_populates="dependencies")
