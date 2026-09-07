@@ -1,5 +1,7 @@
 """Tests de la CLI : aide, version, options globales, erreurs, `config show`."""
 
+import csv
+import io
 import json
 import logging
 import re
@@ -19,9 +21,12 @@ from githor.errors import ConfigError
 from githor.github.client import DEFAULT_API_URL
 from githor.github.errors import AuthenticationError, NotFoundError
 from githor.github.token import ResolvedToken, TokenSource
+from githor.models.finding import Finding, Severity, Status
 from githor.models.repository import Repository
+from githor.models.snapshot import RepositorySnapshot
 from githor.storage.database import Database
-from githor.storage.repositories import upsert_repository
+from githor.storage.findings import save_findings
+from githor.storage.repositories import add_snapshot, upsert_repository
 
 runner = CliRunner()
 
@@ -882,6 +887,165 @@ def test_findings_presents_the_synthesis_in_catalog_order(
 
     assert output.index("README") < output.index("LICENSE") < output.index("CHANGELOG")
     assert output.index("Documentation") < output.index("Maintenance")
+
+
+# ── Compare (étape 22) ───────────────────────────────────────────────────────
+
+
+def seed_two_repositories_for_compare(tmp_path: Path) -> None:
+    """Enregistre deux dépôts aux constats distincts, pour comparer leurs scores."""
+    moment = datetime(2026, 9, 3, 12, 0, tzinfo=UTC)
+    database = Database(tmp_path / "data" / "githor.db")
+    database.create_schema()
+    with database.session() as session:
+        good, _ = upsert_repository(
+            session,
+            Repository(
+                github_id=1,
+                name="Astror",
+                full_name="nouhailler/Astror",
+                owner="nouhailler",
+                html_url="https://github.com/nouhailler/Astror",
+            ),
+        )
+        good_snapshot = add_snapshot(session, good.id, RepositorySnapshot(collected_at=moment))
+        save_findings(
+            session,
+            good.id,
+            good_snapshot.id,
+            [
+                Finding(
+                    category="documentation",
+                    rule="documentation.readme",
+                    severity=Severity.INFO,
+                    status=Status.OK,
+                    message="README présent.",
+                ),
+                Finding(
+                    category="development",
+                    rule="development.tests",
+                    severity=Severity.HIGH,
+                    status=Status.OPEN,
+                    message="tests/ absent.",
+                    recommendation="Ajouter des tests.",
+                ),
+            ],
+        )
+
+        weak, _ = upsert_repository(
+            session,
+            Repository(
+                github_id=2,
+                name="Faible",
+                full_name="nouhailler/Faible",
+                owner="nouhailler",
+                html_url="https://github.com/nouhailler/Faible",
+            ),
+        )
+        weak_snapshot = add_snapshot(session, weak.id, RepositorySnapshot(collected_at=moment))
+        save_findings(
+            session,
+            weak.id,
+            weak_snapshot.id,
+            [
+                Finding(
+                    category="documentation",
+                    rule="documentation.readme",
+                    severity=Severity.HIGH,
+                    status=Status.OPEN,
+                    message="README absent.",
+                    recommendation="Ajouter un README.",
+                ),
+            ],
+        )
+    database.close()
+
+
+def test_compare_ranks_repositories_by_overall_score(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    seed_two_repositories_for_compare(tmp_path)
+
+    result = runner.invoke(cli.app, ["compare"])
+    output = plain(result.output)
+
+    assert result.exit_code == 0
+    assert output.index("nouhailler/Astror") < output.index("nouhailler/Faible")
+    assert "50 %" in output  # Astror : un finding sur deux satisfait
+    assert "0 %" in output  # Faible : aucun
+    assert "—" in output  # aucune règle CI/Security évaluée pour ces findings
+
+
+def test_compare_accepts_a_single_repository(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    seed_two_repositories_for_compare(tmp_path)
+
+    result = runner.invoke(cli.app, ["compare", "Astror"])
+    output = plain(result.output)
+
+    assert result.exit_code == 0
+    assert "nouhailler/Astror" in output
+    assert "nouhailler/Faible" not in output
+
+
+def test_compare_rejects_an_unknown_repository(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    seed_two_repositories_for_compare(tmp_path)
+
+    result = runner.invoke(cli.app, ["compare", "inconnu"])
+
+    assert result.exit_code == 1
+    assert "Repository inconnu" in plain(result.output)
+
+
+def test_compare_without_a_database_says_what_to_run(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(cli.app, ["compare"])
+
+    assert result.exit_code == 1
+    assert "githor scan" in plain(result.output)
+
+
+def test_compare_as_json_carries_the_score(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    seed_two_repositories_for_compare(tmp_path)
+
+    result = runner.invoke(cli.app, ["compare", "Astror", "--format", "json"])
+    payload = json.loads(result.output)
+
+    assert result.exit_code == 0
+    assert payload["repositories"][0]["score"]["overall"] == 50
+
+
+def test_compare_as_csv_carries_the_score(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    seed_two_repositories_for_compare(tmp_path)
+
+    result = runner.invoke(cli.app, ["compare", "Astror", "--format", "csv"])
+    rows = list(csv.DictReader(io.StringIO(result.output)))
+
+    assert result.exit_code == 0
+    assert rows[0]["score_overall"] == "50"
+
+
+def test_compare_never_calls_github(
+    httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    seed_two_repositories_for_compare(tmp_path)
+
+    result = runner.invoke(cli.app, ["compare"])
+
+    assert result.exit_code == 0
+    assert httpx_mock.get_requests() == []
 
 
 # ── Export (étape 11) ────────────────────────────────────────────────────────

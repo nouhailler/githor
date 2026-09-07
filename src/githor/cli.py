@@ -9,6 +9,7 @@ import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from enum import StrEnum
 from pathlib import Path
 from typing import Annotated
 
@@ -33,7 +34,8 @@ from githor.collectors.repositories import (
 from githor.collectors.structure import collect_structure
 from githor.config import AuditConfig, Config, ScanConfig, load_config
 from githor.errors import GithorError
-from githor.exporters import ExportFormat, build_dataset, write_export
+from githor.exporters import ExportFormat, build_dataset, render, write_export
+from githor.exporters.dataset import Dataset, RepositoryExport, build_repository_export
 from githor.github.client import GitHubClient, RateLimit
 from githor.github.errors import NotFoundError
 from githor.github.repositories import get_repository
@@ -1204,6 +1206,90 @@ def _print_findings_detail(report: FindingsReport) -> None:
             if finding.recommendation:
                 console.print(f"    [dim]→ {finding.recommendation}[/dim]", highlight=False)
         console.print()
+
+
+class CompareFormat(StrEnum):
+    """Formats proposés par ``githor compare``."""
+
+    TABLE = "table"
+    JSON = "json"
+    CSV = "csv"
+
+
+@app.command("compare")
+def compare(
+    repository: Annotated[
+        str | None,
+        typer.Argument(
+            metavar="[REPOSITORY]",
+            help="Limite la comparaison à ce dépôt. Sans argument, tous les dépôts enregistrés.",
+        ),
+    ] = None,
+    compare_format: Annotated[
+        CompareFormat,
+        typer.Option(
+            "--format",
+            "-f",
+            case_sensitive=False,
+            help="Format de sortie.",
+        ),
+    ] = CompareFormat.TABLE,
+) -> None:
+    """Compare les dépôts enregistrés sur un score dérivé de leurs constats (§34).
+
+    Le score n'est stocké nulle part : il se recalcule à chaque appel depuis les
+    findings du dernier snapshot de chaque dépôt — voir ``githor.scoring``. Deux
+    appels successifs reflètent donc toujours l'état courant de la base.
+    """
+    config = current_config()
+    rows = _stored_repositories(config, repository)
+
+    with open_database(config) as database:
+        database.create_schema()
+        with database.session() as session:
+            exports = [build_repository_export(session, row) for row in rows]
+
+    if compare_format is CompareFormat.TABLE:
+        console.print(_compare_table(exports))
+        return
+
+    dataset = Dataset(
+        githor_version=__version__,
+        generated_at=utc_now(),
+        repository_count=len(exports),
+        repositories=tuple(exports),
+    )
+    export_format = ExportFormat.JSON if compare_format is CompareFormat.JSON else ExportFormat.CSV
+    sys.stdout.write(render(dataset, export_format))
+
+
+def _compare_table(exports: Sequence[RepositoryExport]) -> Table:
+    """Construit le tableau Project/Docs/Tests/CI/Security/Score, trié par score."""
+    table = Table(show_header=True, header_style="bold", box=None, pad_edge=False)
+    table.add_column("Project")
+    for label in ("Docs", "Tests", "CI", "Security", "Score"):
+        table.add_column(label, justify="right")
+
+    def rank(export: RepositoryExport) -> int:
+        overall = export.score.overall if export.score else None
+        return -1 if overall is None else overall
+
+    for export in sorted(exports, key=rank, reverse=True):
+        score = export.score
+        table.add_row(
+            export.full_name,
+            _score_cell(score.docs if score else None),
+            _score_cell(score.tests if score else None),
+            _score_cell(score.ci if score else None),
+            _score_cell(score.security if score else None),
+            _score_cell(score.overall if score else None),
+        )
+    return table
+
+
+def _score_cell(value: int | None) -> str:
+    """Une case vide plutôt qu'un zéro trompeur, pour un groupe jamais évalué."""
+    return "—" if value is None else f"{value} %"
 
 
 @app.command("repos")
