@@ -75,6 +75,8 @@ def test_the_catalog_covers_the_rules_required_by_the_specification() -> None:
         "development.tests",
         "development.github_actions",
         "infrastructure.docker",
+        "security.dependabot",
+        "security.policy",
         "maintenance.activity",
     }
     assert required <= {rule.id for rule in RULES}
@@ -170,7 +172,20 @@ def test_a_dockerfile_satisfies_the_docker_rule() -> None:
 def test_a_dependabot_configuration_satisfies_its_rule() -> None:
     findings = evaluate(context_for(".github/dependabot.yml"))
 
-    assert finding_for(findings, "infrastructure.dependabot").status is Status.OK
+    assert finding_for(findings, "security.dependabot").status is Status.OK
+
+
+def test_a_security_policy_satisfies_its_rule() -> None:
+    findings = evaluate(context_for("SECURITY.md"))
+
+    assert finding_for(findings, "security.policy").status is Status.OK
+
+
+def test_a_missing_security_policy_opens_a_medium_finding() -> None:
+    finding = finding_for(evaluate(context_for("README.md")), "security.policy")
+
+    assert finding.status is Status.OPEN
+    assert finding.severity is Severity.MEDIUM
 
 
 # ── Maintenance ──────────────────────────────────────────────────────────────
@@ -253,6 +268,7 @@ def test_a_complete_repository_has_no_open_finding() -> None:
             "tests/test_app.py",
             ".github/workflows/ci.yml",
             ".github/dependabot.yml",
+            "SECURITY.md",
             "Dockerfile",
         )
     )

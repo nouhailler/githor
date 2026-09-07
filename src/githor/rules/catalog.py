@@ -14,13 +14,20 @@ from githor.rules.base import InactivityRule, MarkerRule, Rule
 STALE_AFTER_DAYS = 180
 """Seuil d'inactivité : six mois sans push valent un constat."""
 
-CATEGORIES: tuple[str, ...] = ("documentation", "development", "infrastructure", "maintenance")
+CATEGORIES: tuple[str, ...] = (
+    "documentation",
+    "development",
+    "infrastructure",
+    "security",
+    "maintenance",
+)
 """Ordre d'affichage des catégories."""
 
 CATEGORY_LABELS: dict[str, str] = {
     "documentation": "Documentation",
     "development": "Development",
     "infrastructure": "Infrastructure",
+    "security": "Security",
     "maintenance": "Maintenance",
 }
 
@@ -93,13 +100,21 @@ RULES: tuple[Rule, ...] = (
         recommendation="Ajouter un Dockerfile si le projet doit pouvoir être conteneurisé.",
     ),
     MarkerRule(
-        id="infrastructure.dependabot",
-        category="infrastructure",
+        id="security.dependabot",
+        category="security",
         label="Dependabot",
         severity=Severity.LOW,
         marker="dependabot",
         recommendation="Ajouter .github/dependabot.yml pour suivre les mises à jour "
         "de dépendances.",
+    ),
+    MarkerRule(
+        id="security.policy",
+        category="security",
+        label="Politique de sécurité (SECURITY.md)",
+        severity=Severity.MEDIUM,
+        marker="security",
+        recommendation="Ajouter un SECURITY.md décrivant comment signaler une vulnérabilité.",
     ),
     InactivityRule(
         id="maintenance.activity",
