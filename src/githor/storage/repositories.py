@@ -148,6 +148,21 @@ def first_snapshot(session: Session, repository_id: int) -> RepositorySnapshotRo
     )
 
 
+def list_snapshots(session: Session, repository_id: int) -> list[RepositorySnapshotRow]:
+    """Retourne tous les snapshots d'un repository, du plus ancien au plus récent.
+
+    Sert à reconstituer un historique — de score, notamment — sans rien
+    stocker de plus que ce que chaque snapshot porte déjà.
+    """
+    return list(
+        session.scalars(
+            select(RepositorySnapshotRow)
+            .where(RepositorySnapshotRow.repository_id == repository_id)
+            .order_by(RepositorySnapshotRow.collected_at)
+        ).all()
+    )
+
+
 def last_collected_at(session: Session, github_ids: Sequence[int]) -> dict[int, datetime]:
     """Date du dernier snapshot de chaque repository déjà connu.
 

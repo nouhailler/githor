@@ -212,6 +212,27 @@ def test_an_empty_database_produces_an_empty_dataset(database: Database) -> None
     assert dataset.repositories == ()
 
 
+# ── Score ────────────────────────────────────────────────────────────────────
+
+
+def test_the_score_is_derived_from_the_stored_findings(populated: Database) -> None:
+    """documentation.readme (ok) et development.tests (open) sont les seuls findings."""
+    score = dataset_of(populated).repositories[0].score
+
+    assert score is not None
+    assert score.docs == 100
+    assert score.tests == 0
+    assert score.ci is None
+    assert score.security is None
+    assert score.overall == 50
+
+
+def test_a_repository_without_findings_has_no_score(populated: Database) -> None:
+    empty = dataset_of(populated).repositories[1]
+
+    assert empty.score is None
+
+
 # ── JSON ─────────────────────────────────────────────────────────────────────
 
 
@@ -225,6 +246,8 @@ def test_the_json_export_is_valid_and_complete(populated: Database) -> None:
     assert [language["language"] for language in repository["languages"]] == ["TypeScript", "CSS"]
     assert len(repository["findings"]) == 2
     assert repository["releases"][0]["tag"] == "v0.1.0"
+    assert repository["score"]["overall"] == 50
+    assert payload["repositories"][1]["score"] is None
 
 
 def test_the_json_export_writes_dates_in_utc(populated: Database) -> None:
@@ -246,6 +269,10 @@ def test_the_csv_export_is_valid_and_flat(populated: Database) -> None:
     assert rows[0]["files"] == "2"
     assert rows[0]["languages"] == "2"
     assert rows[0]["findings_high"] == "1"
+    assert rows[0]["score_docs"] == "100"
+    assert rows[0]["score_tests"] == "0"
+    assert rows[0]["score_ci"] == ""
+    assert rows[0]["score_overall"] == "50"
 
 
 def test_the_csv_export_leaves_unmeasured_cells_empty(populated: Database) -> None:
@@ -254,6 +281,7 @@ def test_the_csv_export_leaves_unmeasured_cells_empty(populated: Database) -> No
     assert rows[1]["repository"] == "nouhailler/Vide"
     assert rows[1]["stars"] == ""
     assert rows[1]["snapshot"] == ""
+    assert rows[1]["score_overall"] == ""
 
 
 # ── Markdown ─────────────────────────────────────────────────────────────────
@@ -283,6 +311,15 @@ def test_the_markdown_export_ranks_recurring_findings(populated: Database) -> No
 
     assert "`development.tests`" in section
     assert "Élevée" in section
+
+
+def test_the_markdown_overview_carries_a_score_column(populated: Database) -> None:
+    document = render(dataset_of(populated), ExportFormat.MARKDOWN)
+    overview = document.split("## Vue d'ensemble")[1].split("## ")[0]
+
+    assert "| Score |" in overview
+    assert "50 %" in overview
+    assert "—" in overview  # le dépôt jamais scanné n'a pas de score
 
 
 # ── Écriture des fichiers ────────────────────────────────────────────────────

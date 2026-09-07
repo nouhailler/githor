@@ -20,8 +20,10 @@ from githor.errors import StorageError
 from githor.exporters.dataset import RepositoryExport, build_repository_export
 from githor.logging import get_logger
 from githor.reports.markdown import render_report
+from githor.scoring import ScoreHistoryEntry, compute_score
 from githor.storage.code import AuditMetrics, audit_metrics, count_audits, latest_audit
-from githor.storage.repositories import count_snapshots, first_snapshot
+from githor.storage.findings import findings_for_snapshot
+from githor.storage.repositories import count_snapshots, first_snapshot, list_snapshots
 from githor.storage.tables import RepositoryRow
 from githor.utils.dates import utc_now
 
@@ -58,6 +60,13 @@ class Report(BaseModel):
     audits: int = 0
     """Nombre d'audits de code conservés."""
 
+    score_history: tuple[ScoreHistoryEntry, ...] = ()
+    """Score à chaque snapshot connu, du plus ancien au plus récent.
+
+    Dérivé des findings de chaque snapshot — voir :mod:`githor.scoring`. Le
+    dernier de la liste correspond à ``repository.score``.
+    """
+
 
 def build_report(
     session: Session, row: RepositoryRow, *, generated_at: datetime | None = None
@@ -79,9 +88,25 @@ def build_report(
         first_snapshot_at=oldest.collected_at if oldest else None,
         code=audit_metrics(session, audit) if audit is not None else None,
         audits=count_audits(session, row.id),
+        score_history=_score_history(session, row.id),
     )
     logger.debug("Rapport construit : %s (%s snapshot(s)).", row.full_name, report.snapshots)
     return report
+
+
+def _score_history(session: Session, repository_id: int) -> tuple[ScoreHistoryEntry, ...]:
+    """Recalcule le score de chaque snapshot connu, depuis ses findings.
+
+    Rien n'est stocké : l'historique existe déjà dans les findings persistés
+    à chaque scan, il suffit de les relire snapshot par snapshot.
+    """
+    return tuple(
+        ScoreHistoryEntry(
+            collected_at=snapshot.collected_at,
+            score=compute_score(findings_for_snapshot(session, snapshot.id)),
+        )
+        for snapshot in list_snapshots(session, repository_id)
+    )
 
 
 def report_filename(full_name: str, *, moment: datetime | None = None) -> str:

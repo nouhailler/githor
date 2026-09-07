@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from githor import __version__
 from githor.logging import get_logger
 from githor.models.code import DependencyScope
+from githor.scoring import Score, compute_score
 from githor.storage.code import audit_metrics, latest_audit
 from githor.storage.findings import latest_findings
 from githor.storage.repositories import latest_snapshot, list_stored_repositories
@@ -189,6 +190,9 @@ class RepositoryExport(BaseModel):
     code: CodeExport | None = None
     """Dernière analyse locale, ``None`` si le dépôt n'a jamais été analysé."""
 
+    score: Score | None = None
+    """Dérivé des ``findings`` ci-dessus, jamais stocké : voir :mod:`githor.scoring`."""
+
     @property
     def open_findings(self) -> tuple[FindingExport, ...]:
         """Constats ouverts, dans l'ordre où ils ont été lus."""
@@ -270,6 +274,7 @@ def build_repository_export(session: Session, row: RepositoryRow) -> RepositoryE
         findings=findings,
         releases=releases,
         code=_code(session, row.id),
+        score=compute_score(findings),
     )
 
 

@@ -39,6 +39,11 @@ COLUMNS: tuple[str, ...] = (
     "findings_high",
     "findings_medium",
     "findings_low",
+    "score_docs",
+    "score_tests",
+    "score_ci",
+    "score_security",
+    "score_overall",
     "code_analysed",
     "code_commit",
     "code_files",
@@ -103,9 +108,30 @@ def _row(repository: RepositoryExport) -> list[str]:
         str(metrics.findings_high),
         str(metrics.findings_medium),
         str(metrics.findings_low),
+        *_score_columns(repository),
         *_code_columns(repository),
         repository.url,
     ]
+
+
+def _score_columns(repository: RepositoryExport) -> list[str]:
+    """Colonnes de score, vides pour un dépôt jamais scanné — pas des zéros."""
+    score = repository.score
+    if score is None:
+        return [""] * 5
+
+    return [
+        _percentage(score.docs),
+        _percentage(score.tests),
+        _percentage(score.ci),
+        _percentage(score.security),
+        _percentage(score.overall),
+    ]
+
+
+def _percentage(value: int | None) -> str:
+    """Une case vide pour un groupe sans règle évaluée, jamais un zéro trompeur."""
+    return "" if value is None else str(value)
 
 
 def _code_columns(repository: RepositoryExport) -> list[str]:

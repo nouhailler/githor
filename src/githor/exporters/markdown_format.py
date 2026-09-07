@@ -36,12 +36,13 @@ def _overview(repositories: Iterable[RepositoryExport]) -> list[str]:
     lines = [
         "## Vue d'ensemble",
         "",
-        "| Repository | Langage | ★ | Fichiers | Commits 90j | Issues | Constats |",
-        "|---|---|---:|---:|---:|---:|---:|",
+        "| Repository | Langage | ★ | Fichiers | Commits 90j | Issues | Constats | Score |",
+        "|---|---|---:|---:|---:|---:|---:|---:|",
     ]
     for repository in repositories:
         snapshot = repository.snapshot
         metrics = repository.metrics
+        score = repository.score
         lines.append(
             f"| [{escape_cell(repository.full_name)}]({repository.url}) "
             f"| {escape_cell(snapshot.primary_language if snapshot else None) or ABSENT} "
@@ -49,7 +50,8 @@ def _overview(repositories: Iterable[RepositoryExport]) -> list[str]:
             f"| {metrics.files} "
             f"| {metrics.commits_90_days} "
             f"| {metrics.open_issues} "
-            f"| {metrics.findings_open} |"
+            f"| {metrics.findings_open} "
+            f"| {ABSENT if score is None or score.overall is None else f'{score.overall} %'} |"
         )
     lines.append("")
     return lines

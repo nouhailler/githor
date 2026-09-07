@@ -210,6 +210,73 @@ def test_metrics_come_from_the_shared_dataset(populated: Database) -> None:
     assert metrics.findings_open == 2
 
 
+def test_the_score_is_derived_from_the_stored_findings(populated: Database) -> None:
+    """FINDINGS : readme ok, changelog et tests ouverts — docs 1/2, tests 0/1, overall 1/3."""
+    score = report_of(populated, "Architecturor").repository.score
+
+    assert score is not None
+    assert score.docs == 50
+    assert score.tests == 0
+    assert score.ci is None
+    assert score.security is None
+    assert score.overall == 33
+
+
+def test_a_never_scanned_repository_has_no_score(populated: Database) -> None:
+    assert report_of(populated, "Vide").repository.score is None
+
+
+def test_the_score_history_covers_every_snapshot(populated: Database) -> None:
+    """L'historique de score se relit depuis les findings de chaque snapshot passé."""
+    with populated.session() as session:
+        row = find_repository_by_name(session, "Architecturor")
+        assert row is not None
+        later = add_snapshot(
+            session,
+            row.id,
+            build_snapshot(ARCHITECTUROR, collected_at=NOW + timedelta(days=30), open_prs=1),
+        )
+        save_findings(
+            session,
+            row.id,
+            later.id,
+            [
+                Finding(
+                    category="documentation",
+                    rule="documentation.readme",
+                    severity=Severity.INFO,
+                    status=Status.OK,
+                    message="README présent : README.md.",
+                ),
+                Finding(
+                    category="documentation",
+                    rule="documentation.changelog",
+                    severity=Severity.INFO,
+                    status=Status.OK,
+                    message="CHANGELOG présent : CHANGELOG.md.",
+                ),
+                Finding(
+                    category="development",
+                    rule="development.tests",
+                    severity=Severity.HIGH,
+                    status=Status.OPEN,
+                    message="tests/ absent.",
+                    recommendation="Ajouter un répertoire de tests.",
+                ),
+            ],
+        )
+
+    report = report_of(populated, "Architecturor")
+
+    assert [entry.collected_at for entry in report.score_history] == [NOW, NOW + timedelta(days=30)]
+    assert report.score_history[0].score is not None
+    assert report.score_history[0].score.overall == 33
+    assert report.score_history[1].score is not None
+    assert report.score_history[1].score.overall == 67
+    # Le score du dernier snapshot reste celui exposé par le repository de l'export.
+    assert report.repository.score == report.score_history[-1].score
+
+
 # ── Rendu Markdown ───────────────────────────────────────────────────────────
 
 
@@ -281,6 +348,42 @@ def test_releases_are_listed_with_their_state(populated: Database) -> None:
 
 def test_a_pipe_in_a_description_does_not_break_a_table(populated: Database) -> None:
     assert "Appli \\| pour architectes" in rendered(populated)
+
+
+def test_the_score_section_reports_the_derived_percentages(populated: Database) -> None:
+    document = rendered(populated)
+
+    assert "## Score" in document
+    assert "| Docs | Tests | CI | Security | Overall |" in document
+    assert "| 50 % | 0 % | — | — | 33 % |" in document
+
+
+def test_a_never_scanned_repository_has_no_score_section(populated: Database) -> None:
+    assert "## Score" not in rendered(populated, "Vide")
+
+
+def test_the_score_history_appears_once_two_snapshots_are_scored(populated: Database) -> None:
+    with populated.session() as session:
+        row = find_repository_by_name(session, "Architecturor")
+        assert row is not None
+        later = add_snapshot(
+            session,
+            row.id,
+            build_snapshot(ARCHITECTUROR, collected_at=NOW + timedelta(days=30), open_prs=1),
+        )
+        save_findings(session, row.id, later.id, list(FINDINGS))
+
+    document = rendered(populated)
+
+    assert "### Évolution du score" in document
+    assert "| Date | Overall |" in document
+    assert "| 2026-09-03 12:00 UTC | 33 % |" in document
+    assert "| 2026-10-03 12:00 UTC | 33 % |" in document
+
+
+def test_a_single_scored_snapshot_has_no_history_table(populated: Database) -> None:
+    """Un seul snapshot n'offre rien à comparer : la section resterait vide."""
+    assert "### Évolution du score" not in rendered(populated)
 
 
 def test_a_repository_without_a_snapshot_says_what_to_do(populated: Database) -> None:

@@ -19,6 +19,7 @@ from githor.utils.markdown import ABSENT, escape_cell, format_moment, severity_l
 
 if TYPE_CHECKING:  # pragma: no cover — importé seulement pour le typage
     from githor.reports import Report
+    from githor.scoring import ScoreHistoryEntry
     from githor.storage.code import AuditMetrics
 
 PRESENT_MARK = "✓"
@@ -47,6 +48,7 @@ def render_report(report: "Report") -> str:
     lines += _overview(repository)
     lines += _languages(repository)
     lines += _code(report)
+    lines += _score(repository)
     lines += _checks(repository)
     lines += _releases(repository)
     lines += _findings(repository)
@@ -127,6 +129,26 @@ def _languages(repository: RepositoryExport) -> list[str]:
     ]
     lines.append("")
     return lines
+
+
+def _score(repository: RepositoryExport) -> list[str]:
+    """Score dérivé des constats du dernier snapshot (§34, comparaison inter-projets)."""
+    score = repository.score
+    if score is None:
+        return []
+
+    def cell(value: int | None) -> str:
+        return ABSENT if value is None else f"{value} %"
+
+    return [
+        "## Score",
+        "",
+        "| Docs | Tests | CI | Security | Overall |",
+        "|---:|---:|---:|---:|---:|",
+        f"| {cell(score.docs)} | {cell(score.tests)} | {cell(score.ci)} "
+        f"| {cell(score.security)} | {cell(score.overall)} |",
+        "",
+    ]
 
 
 def _checks(repository: RepositoryExport) -> list[str]:
@@ -355,7 +377,7 @@ def _history(report: "Report") -> list[str]:
     if report.snapshots <= 1:
         return ["## Historique", "", "Premier snapshot : aucun historique à comparer.", ""]
 
-    return [
+    lines = [
         "## Historique",
         "",
         f"{report.snapshots} snapshots conservés, "
@@ -363,3 +385,19 @@ def _history(report: "Report") -> list[str]:
         "Les mesures précédentes restent en base : elles ne sont jamais écrasées.",
         "",
     ]
+    lines += _score_history(report.score_history)
+    return lines
+
+
+def _score_history(history: "tuple[ScoreHistoryEntry, ...]") -> list[str]:
+    """Score global à chaque snapshot connu, recalculé depuis ses findings."""
+    rows: list[str] = []
+    for entry in history:
+        overall = entry.score.overall if entry.score is not None else None
+        if overall is None:
+            continue
+        rows.append(f"| {format_moment(entry.collected_at)} | {overall} % |")
+
+    if len(rows) <= 1:
+        return []
+    return ["### Évolution du score", "", "| Date | Overall |", "|---|---:|", *rows, ""]
