@@ -124,6 +124,22 @@ accepter qu'ils divergent un jour. Les fenêtres de commits se comptent depuis l
 **date du snapshot**, non depuis l'instant de l'export : un même snapshot doit
 toujours produire le même chiffre.
 
+### Le score aussi est dérivé — et son historique avec lui
+
+La V0.3 (`githor compare`) avait besoin d'un score par catégorie (Docs, Tests,
+CI, Security) et de son évolution dans le temps. Rien n'a été ajouté au
+schéma : `findings` porte déjà, pour chaque snapshot, le statut de chaque
+règle. Un score n'est donc qu'une lecture groupée de ce qui existe — voir
+`githor.scoring.compute_score` — et l'historique des scores n'est que ce même
+calcul rejoué sur les findings de chaque snapshot passé.
+
+Cela révise ce que ce document prédisait plus bas : la V0.3 n'a **pas**
+obligé à introduire les migrations. Une table `repository_scores` aurait
+dupliqué une information déjà entièrement reconstituible, en violation directe
+du principe ci-dessus. Le jour où un score deviendra coûteux à recalculer, ou
+où la comparaison portera sur des critères qui ne se lisent plus dans
+`findings`, la question se reposera — mais elle ne s'est pas posée ici.
+
 ### Un export ne remplace pas le précédent
 
 Le fichier produit est horodaté. Un export est une photographie, au même titre
@@ -206,8 +222,12 @@ des charges n'a plus de manque connu.
 
 La **V0.2 — Code Auditor** est livrée (étapes 14 à 18) : clone local, décompte
 de lignes, AST, complexité, imports, dépendances déclarées et détection des
-tests, le tout persisté et rendu dans les rapports comme dans les exports. Le
-détail est dans le [CHANGELOG](CHANGELOG.md).
+tests, le tout persisté et rendu dans les rapports comme dans les exports.
+
+La **V0.3 — Project Intelligence** est livrée (étapes 19 à 23) : catégorie
+`security`, score dérivé des findings (Docs/Tests/CI/Security/Overall),
+`githor compare`, et son historique dans `githor report`. Le détail est dans
+le [CHANGELOG](CHANGELOG.md).
 
 ## Conventions
 
@@ -239,8 +259,9 @@ n'est pas une coïncidence mais une limite acceptée : elle a écarté d'emblée
 toute idée d'enrichir `repository_snapshots` avec des mesures de code.
 
 La contrainte tiendra tant qu'une évolution ne réclamera pas de colonne. La
-V0.3, qui voudra sans doute stocker des scores comparables, sera probablement
-celle qui obligera à introduire les migrations pour de bon.
+V0.3 aurait pu être celle-là — elle voulait des scores comparables — mais elle
+n'a ajouté ni table ni colonne : voir « Le score aussi est dérivé », plus haut.
+La question reste ouverte pour la V0.4.
 
 ## Trajectoire
 
@@ -248,7 +269,7 @@ celle qui obligera à introduire les migrations pour de bon.
 |---|---|---|
 | V0.1 | Inventaire, snapshots, findings, exports, rapports | livrée (0.1.0) |
 | **V0.2** | Code Auditor : clone local, AST, LOC, complexité, imports, dépendances, tests | livrée |
-| V0.3 | Project Intelligence : comparaison, scores, historique | à faire — réclamera probablement les migrations |
+| **V0.3** | Project Intelligence : catégorie security, score dérivé, comparaison, historique | livrée |
 | V0.4 | AI Advisor : analyse via Ollama, recommandations priorisées | à faire — s'appuiera sur des findings et des audits traçables |
 
 Les couches sont séparées pour cela : `github/` ne connaît ni la base ni la CLI,

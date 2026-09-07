@@ -215,6 +215,9 @@ githor scan Architecturor         # scanne un seul dépôt
 githor scan --freshness 24        # ignore les dépôts mesurés dans les 24 dernières heures
 githor findings                   # synthèse des constats de tous les dépôts
 githor findings Architecturor     # détail d'un dépôt : ce qui est là, ce qui manque
+githor compare                    # score de tous les dépôts, triés du meilleur au pire
+githor compare Architecturor      # un seul dépôt
+githor compare --format json      # jeu de données complet, sur stdout
 githor export --format json       # export complet dans data/exports/
 githor export -f csv              # une ligne par repository
 githor export -f markdown         # inventaire lisible
@@ -343,6 +346,7 @@ produit un fichier exploitable.
 │   ├── models/       # repository, snapshot, activity, release, issue, finding, code
 │   ├── collectors/   # repositories, langages, structure, activité, releases, issues
 │   ├── rules/        # catalogue de règles et moteur d'évaluation
+│   ├── scoring.py    # score dérivé des findings, jamais stocké
 │   ├── storage/      # SQLAlchemy : schéma (tables.py) et session (database.py)
 │   ├── exporters/    # jeu de données, métriques dérivées, JSON, CSV, Markdown
 │   ├── reports/      # rapport Markdown d'un seul dépôt
@@ -525,7 +529,7 @@ Constats ouverts (5)
 
 `githor findings` ne joint pas GitHub : il relit la base produite par le scan.
 
-### Règles de la V0.1
+### Catalogue des règles
 
 | Règle | Gravité si absent | Fondement |
 |---|---|---|
@@ -537,8 +541,13 @@ Constats ouverts (5)
 | `development.tests` | élevée | répertoire `tests/`, `test/` ou `spec/` |
 | `development.github_actions` | moyenne | répertoire `.github/workflows/` |
 | `infrastructure.docker` | faible | `Dockerfile` ou `Containerfile` |
-| `infrastructure.dependabot` | faible | `.github/dependabot.yml` |
+| `security.dependabot` | faible | `.github/dependabot.yml` |
+| `security.policy` | moyenne | fichier `SECURITY.md` |
 | `maintenance.activity` | moyenne | aucun push depuis 180 jours |
+
+`security.dependabot` s'appelait `infrastructure.dependabot` avant la V0.3 : les
+constats déjà enregistrés sous l'ancien identifiant restent en base, inchangés —
+un rapport tiré d'un snapshot antérieur continue de les citer tels quels.
 
 Un dépôt **archivé** ne se voit pas reprocher son inactivité : son immobilité est
 voulue.
@@ -561,18 +570,46 @@ est-il là ? » — il suffit d'une déclaration :
 
 ```python
 MarkerRule(
-    id="documentation.security",
+    id="documentation.editorconfig",
     category="documentation",
-    label="SECURITY",
+    label=".editorconfig",
     severity=Severity.LOW,
-    marker="security",  # marqueur défini dans collectors/structure.py
-    recommendation="Ajouter un SECURITY.md décrivant le signalement des failles.",
+    marker="editorconfig",  # marqueur défini dans collectors/structure.py
+    recommendation="Ajouter un .editorconfig.",
 )
 ```
 
 Une règle qui demande une logique propre dérive de `Rule` et implémente `check()`,
 comme `InactivityRule`. Elle ne connaît ni GitHub ni SQLite : elle lit un
 `RuleContext` déjà collecté et rend un `Verdict`.
+
+## Comparaison
+
+```bash
+githor compare                        # tous les dépôts, triés par score
+githor compare Architecturor          # un seul dépôt
+githor compare --format json          # jeu de données complet, sur stdout
+githor compare --format csv           # une ligne par dépôt, pour un tableur
+```
+
+```text
+Project                    Docs   Tests     CI  Security  Score
+nouhailler/astror         100 %     0 %  100 %         —   70 %
+nouhailler/Architecturor   60 %     0 %  100 %         —   50 %
+```
+
+Le score d'un dépôt se lit dans quatre catégories (Docs, Tests, CI, Security) et
+un score global — le pourcentage de règles satisfaites parmi celles qui ont été
+évaluées à ce snapshot. Une catégorie tirée `—` signifie qu'aucune règle du
+groupe n'apparaît dans les constats connus, jamais un zéro : c'est le cas de
+`Security` tant qu'un dépôt n'a pas été rescanné avec les règles introduites en
+V0.3.
+
+**Le score n'est stocké nulle part.** Il se recalcule à chaque appel depuis les
+constats déjà enregistrés par `githor scan` — voir `githor.scoring`. Il n'y a
+donc rien à migrer, et l'historique existe déjà : `githor report` en tire une
+section « Évolution du score » en relisant les constats de chaque snapshot
+passé.
 
 ## Exports
 
@@ -600,7 +637,7 @@ manque le plus souvent, donc ce qu'on gagnerait à corriger une fois pour toutes
 ```markdown
 | Règle | Gravité | Dépôts concernés |
 |---|---|---:|
-| `infrastructure.dependabot` | Faible | 78 |
+| `security.dependabot` | Faible | 78 |
 | `development.tests` | Élevée | 72 |
 | `documentation.license` | Moyenne | 63 |
 ```
@@ -756,7 +793,7 @@ quand il est suivi.
 ```markdown
 # nouhailler/Architecturor
 
-*Rapport Githor 0.2.0 — généré le 2026-09-05 12:27 UTC, d'après le snapshot du 2026-09-05 08:31 UTC.*
+*Rapport Githor 0.3.0 — généré le 2026-09-05 12:27 UTC, d'après le snapshot du 2026-09-05 08:31 UTC.*
 
 <https://github.com/nouhailler/Architecturor> — public · branche `main`
 
@@ -789,6 +826,12 @@ quand il est suivi.
 | TypeScript | 51 | 4102 | 296 |
 | CSS | 12 | 604 | 24 |
 
+## Score
+
+| Docs | Tests | CI | Security | Overall |
+|---:|---:|---:|---:|---:|
+| 60 % | 0 % | 100 % | — | 50 % |
+
 ## Documentation
 
 | Item | Status |
@@ -811,6 +854,11 @@ snapshot, et non ce que Githor saurait vérifier aujourd'hui.
 La section **Code** vient de l'audit, non du snapshot : ce sont deux mesures
 distinctes, prises par des chemins différents. L'une peut exister sans l'autre,
 et le rapport dit ce qui est enregistré sans jamais supposer la seconde.
+
+La section **Score** est absente d'un dépôt jamais scanné, au même titre que les
+autres. Dès qu'un deuxième snapshot existe, une section « Évolution du score »
+apparaît en fin de rapport, sous **Historique** : elle rejoue le même calcul sur
+les constats de chaque snapshot passé — voir [Comparaison](#comparaison).
 
 L'exemple ci-dessus est celui d'un projet TypeScript : ses lignes sont comptées,
 mais `Functions` vaut zéro et la complexité moyenne est absente. C'est le
@@ -849,8 +897,8 @@ Les tests n'utilisent **jamais** de token GitHub réel : le transport HTTP est m
 | Version | Contenu |
 |---|---|
 | V0.1 | Inventaire, métadonnées, langages, structure, activité, issues, releases, métriques, findings, snapshots, exports, rapports |
-| **V0.2** | Code Auditor : clone local, AST, LOC, complexité, imports, dépendances, tests |
-| V0.3 | Project Intelligence : comparaison inter-projets, scores, historique |
+| V0.2 | Code Auditor : clone local, AST, LOC, complexité, imports, dépendances, tests |
+| **V0.3** | Project Intelligence : catégorie security, score dérivé, `githor compare`, historique |
 | V0.4 | AI Advisor : analyse via Ollama, recommandations priorisées |
 
 ## Licence

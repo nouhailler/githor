@@ -6,7 +6,56 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), et le
 projet respecte le [versionnement sémantique](https://semver.org/lang/fr/).
 
 Les étapes numérotées renvoient au plan de développement : les treize de la V0.1
-sont franchies, et les étapes 14 à 18 constituent la V0.2.
+sont franchies, les étapes 14 à 18 constituent la V0.2, et les étapes 19 à 23
+la V0.3.
+
+## [0.3.0] — 2026-09-07
+
+**Project Intelligence.** La 0.1.0 disait ce que GitHub sait d'un dépôt, la
+0.2.0 a ouvert son code. La 0.3.0 compare : un score par dépôt, dérivé de ce
+qui était déjà enregistré, et rien de plus stocké pour l'obtenir.
+
+### Ajouté
+
+- **Catégorie `security` et ses règles** *(étape 19)*.
+  - `infrastructure.dependabot` devient `security.dependabot` — les constats
+    déjà enregistrés sous l'ancien identifiant restent en base, inchangés :
+    un rapport tiré d'un snapshot antérieur à ce changement continue de les
+    citer tels quels ;
+  - nouvelle règle `security.policy` : présence d'un `SECURITY.md`. Le
+    marqueur existait déjà dans le collecteur de structure depuis la 0.1.0,
+    inutilisé par aucune règle — coût nul côté collecte.
+- **Score dérivé des findings** *(étape 20)*, `githor.scoring`.
+  - un score est un pourcentage de règles satisfaites, par groupe (Docs,
+    Tests, CI, Security) et global ; un groupe sans règle représentée dans
+    les findings vaut `None`, jamais zéro — une valeur absente vaut mieux
+    qu'un chiffre faux ;
+  - **rien n'est stocké.** `findings` porte déjà, pour chaque snapshot, le
+    statut de chaque règle : un score n'est qu'une lecture groupée de ce qui
+    existe. Aucune table, aucune colonne, aucune migration.
+- **Score dans les exports et les rapports** *(étape 21)*.
+  - `RepositoryExport` gagne un champ `score`, calculé une fois dans
+    `build_repository_export` : `githor compare`, `githor report` et les
+    trois formats d'export le lisent tous depuis la même fonction ;
+  - `githor report` gagne une section **Score** et, dès le second snapshot,
+    une section **Évolution du score** — l'historique existe déjà dans les
+    findings de chaque snapshot passé, il suffit de les rejouer ;
+  - le CSV gagne cinq colonnes `score_*`, vides et non à zéro pour un dépôt
+    jamais scanné ; le Markdown multi-dépôts gagne une colonne Score.
+- **Commande `githor compare`** *(étape 22)*.
+  - tableau Project/Docs/Tests/CI/Security/Score, trié du meilleur score au
+    plus faible — le tableau visé par le cahier des charges (§34) ;
+  - `--format json|csv` réutilise les mêmes rendus que `githor export`, sur
+    `stdout` plutôt que dans un fichier : `compare` est une lecture, pas une
+    photographie ;
+  - ne joint jamais GitHub : comme `findings` et `report`, la commande relit
+    la seule base.
+
+### Documenté
+
+- `CONTEXT.md` révise sa propre prédiction : la V0.3 n'a pas eu besoin des
+  migrations qu'elle anticipait, le score se dérivant entièrement des
+  findings déjà persistés.
 
 ## [0.2.0] — 2026-09-05
 
