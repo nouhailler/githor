@@ -20,6 +20,7 @@ from rich.table import Table
 from sqlalchemy.orm import Session
 
 from githor import __version__
+from githor.analysis.advisor import generate_advice
 from githor.analysis.audit import audit_checkout
 from githor.collectors.activity import collect_activity
 from githor.collectors.issues import collect_issues
@@ -42,14 +43,19 @@ from githor.github.repositories import get_repository
 from githor.github.token import find_token, require_token
 from githor.github.user import get_authenticated_login, get_authenticated_user
 from githor.logging import get_logger, setup_logging
+from githor.models.advice import Advice
 from githor.models.code import CodeAudit, DependencyScope, ImportKind
 from githor.models.finding import SEVERITY_LABELS, SEVERITY_ORDER, Severity, Status
 from githor.models.repository import Repository
+from githor.ollama.client import OllamaClient
+from githor.ollama.errors import OllamaError
 from githor.reports import build_report, render_report, write_report
 from githor.rules.base import RuleContext
 from githor.rules.catalog import CATEGORIES, CATEGORY_LABELS, rule_labels
 from githor.rules.engine import evaluate, open_findings
-from githor.storage.code import count_audits, save_audit
+from githor.scoring import compute_score
+from githor.storage.advice import count_advice_runs, save_advice
+from githor.storage.code import audit_metrics, count_audits, latest_audit, save_audit
 from githor.storage.database import Database
 from githor.storage.findings import latest_findings, save_findings
 from githor.storage.repositories import (
@@ -923,6 +929,158 @@ def _audit_table(results: Sequence[tuple[str, CodeAudit]]) -> Table:
             "—" if average is None else f"{average}",
             str(result.tests.files) if result.tests.exists else "[yellow]0[/yellow]",
             str(len(result.dependencies)),
+        )
+    return table
+
+
+@app.command("advise")
+def advise(
+    repository: Annotated[
+        str | None,
+        typer.Argument(
+            metavar="REPOSITORY",
+            help="Dépôt à conseiller ; tous ceux de la base par défaut.",
+        ),
+    ] = None,
+    save: Annotated[
+        bool,
+        typer.Option(
+            "--save/--no-save",
+            help="Enregistre les recommandations en base. Activé par défaut.",
+        ),
+    ] = True,
+    model: Annotated[
+        str | None,
+        typer.Option("--model", help="Modèle Ollama à interroger, au lieu de celui configuré."),
+    ] = None,
+) -> None:
+    """Génère des recommandations prioritaires pour les dépôts, via Ollama.
+
+    Githor priorise : l'ordre des recommandations vient des constats ouverts
+    déjà enregistrés, triés par gravité, exactement comme dans un rapport.
+    Ollama ne fait que rédiger un titre et une recommandation pour chacun,
+    dans cet ordre — il ne choisit jamais quoi mettre en premier, ni ne
+    commente rien qui ne soit pas déjà un constat connu.
+
+    Comme le reste des commandes locales, elle relit la base et n'appelle
+    jamais GitHub. Ollama tourne en local : aucune donnée du dépôt n'est
+    envoyée à un service tiers.
+    """
+    config = current_config()
+    rows = _stored_repositories(config, repository)
+    model_name = model or config.ollama.model
+
+    console.print("[bold]Githor — conseiller IA[/bold]\n")
+    detailed = len(rows) == 1
+    results: list[tuple[str, Advice]] = []
+    skipped = 0
+    failed = 0
+
+    database = open_database(config)
+    database.create_schema()
+
+    with OllamaClient(config.ollama.host, timeout=config.ollama.timeout_seconds) as client:
+        for row in rows:
+            with database.session() as session:
+                findings = latest_findings(session, row.id)
+                score = compute_score(findings)
+                audit_row = latest_audit(session, row.id)
+                code = audit_metrics(session, audit_row) if audit_row is not None else None
+
+            try:
+                with stderr_console.status(f"Conseil IA pour {row.full_name}…"):
+                    advice = generate_advice(
+                        client,
+                        repository=row,
+                        findings=findings,
+                        score=score,
+                        code=code,
+                        model=model_name,
+                    )
+            except OllamaError as exc:
+                failed += 1
+                stderr_console.print(f"[red]✗[/red] {row.full_name} : {exc}", highlight=False)
+                continue
+
+            if advice is None:
+                skipped += 1
+                console.print(
+                    f"[dim]— {row.full_name} : rien à recommander (aucun constat ouvert).[/dim]",
+                    highlight=False,
+                )
+                continue
+
+            results.append((row.full_name, advice))
+
+            stored = 0
+            if save:
+                with database.session() as session:
+                    save_advice(session, row.id, advice)
+                    stored = count_advice_runs(session, row.id)
+
+            if detailed:
+                _print_advice_detail(row.full_name, advice, runs=stored)
+            else:
+                console.print(
+                    f"[green]✓[/green] {row.full_name} "
+                    f"[dim]({len(advice.items)} recommandation(s))[/dim]",
+                    highlight=False,
+                )
+
+    database.close()
+
+    if not detailed and results:
+        console.print()
+        console.print(_advice_table(results))
+
+    summary = f"\n[bold]{len(results)}[/bold] dépôt(s) conseillé(s)"
+    if skipped:
+        summary += f", {skipped} sans constat ouvert"
+    console.print(summary + ".", highlight=False)
+    if save and results:
+        console.print(f"Base : {config.storage.database}", highlight=False)
+    elif results:
+        console.print("[dim]--no-save : rien n'a été écrit en base.[/dim]")
+    if failed:
+        console.print(f"[red]{failed} dépôt(s) en échec.[/red]", highlight=False)
+        raise typer.Exit(code=1)
+
+
+def _print_advice_detail(full_name: str, advice: Advice, *, runs: int = 0) -> None:
+    """Détaille les recommandations d'un seul dépôt.
+
+    Args:
+        full_name: nom complet du dépôt.
+        advice: recommandations à rendre.
+        runs: nombre d'exécutions conservées, ``0`` si rien n'a été enregistré.
+    """
+    kept = f" · exécution {runs}" if runs else ""
+    console.print(f"[bold]{full_name}[/bold] [dim]{kept}[/dim]\n", highlight=False)
+
+    if advice.degraded:
+        console.print(
+            "[yellow]Réponse non structurée : recommandations conservées telles quelles, "
+            "sans association aux constats.[/yellow]\n"
+        )
+
+    for item in advice.items:
+        rule = f" [dim]({item.source_rule})[/dim]" if item.source_rule else ""
+        console.print(f"[bold]{item.rank}. {item.title}[/bold]{rule}", highlight=False)
+        console.print(item.recommendation, highlight=False)
+        console.print()
+
+
+def _advice_table(results: Sequence[tuple[str, Advice]]) -> Table:
+    """Synthèse du conseil portant sur plusieurs dépôts."""
+    table = Table(show_header=True, header_style="bold", box=None, pad_edge=False)
+    table.add_column("Repository")
+    table.add_column("Recommandations", justify="right")
+    table.add_column("Modèle")
+
+    for full_name, advice in results:
+        count = str(len(advice.items))
+        table.add_row(
+            full_name, f"[yellow]{count}[/yellow]" if advice.degraded else count, advice.model
         )
     return table
 

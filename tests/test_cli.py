@@ -10,6 +10,7 @@ import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import httpx
 import pytest
 import typer
 from pytest_httpx import HTTPXMock
@@ -1621,3 +1622,199 @@ def test_a_report_carries_the_audit_after_it_ran(
 
     assert "## Code" in output
     assert "| Functions | 1 |" in output
+
+
+# ── githor advise (étape 27) ─────────────────────────────────────────────────
+
+OLLAMA_GENERATE_URL = "http://localhost:11434/api/generate"
+
+OPEN_FINDING = Finding(
+    category="development",
+    rule="development.tests",
+    severity=Severity.HIGH,
+    status=Status.OPEN,
+    message="tests/ absent.",
+    recommendation="Ajouter un répertoire de tests.",
+)
+
+OK_FINDING = Finding(
+    category="documentation",
+    rule="documentation.readme",
+    severity=Severity.INFO,
+    status=Status.OK,
+    message="README présent : README.md.",
+)
+
+
+def seed_repository_with_findings(tmp_path: Path, *, findings: list[Finding]) -> None:
+    """Enregistre un dépôt, un snapshot et ses constats — sans passer par un scan."""
+    database = Database(tmp_path / "data" / "githor.db")
+    database.create_schema()
+    with database.session() as session:
+        row, _ = upsert_repository(
+            session,
+            Repository(
+                github_id=1,
+                name="Architecturor",
+                full_name="nouhailler/Architecturor",
+                owner="nouhailler",
+                html_url="https://github.com/nouhailler/Architecturor",
+            ),
+        )
+        snapshot = add_snapshot(
+            session,
+            row.id,
+            RepositorySnapshot(collected_at=datetime(2026, 9, 8, 12, 0, tzinfo=UTC)),
+        )
+        save_findings(session, row.id, snapshot.id, findings)
+    database.close()
+
+
+def mock_advice(
+    httpx_mock: HTTPXMock, items: list[dict[str, str]], *, reusable: bool = False
+) -> None:
+    """Simule la réponse d'Ollama à /api/generate."""
+    httpx_mock.add_response(
+        url=OLLAMA_GENERATE_URL, json={"response": json.dumps(items)}, is_reusable=reusable
+    )
+
+
+def test_advise_generates_a_recommendation_for_an_open_finding(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, httpx_mock: HTTPXMock
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    seed_repository_with_findings(tmp_path, findings=[OPEN_FINDING])
+    mock_advice(httpx_mock, [{"title": "Ajouter des tests", "recommendation": "Créer tests/."}])
+
+    result = runner.invoke(cli.app, ["advise", "Architecturor"])
+    output = plain(result.output)
+
+    assert result.exit_code == 0
+    assert "Ajouter des tests" in output
+    assert "development.tests" in output
+    assert "1" in output and "conseillé" in output
+
+
+def test_advise_skips_a_repository_without_open_findings(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, httpx_mock: HTTPXMock
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    seed_repository_with_findings(tmp_path, findings=[OK_FINDING])
+
+    result = runner.invoke(cli.app, ["advise", "Architecturor"])
+
+    assert result.exit_code == 0
+    assert "rien à recommander" in plain(result.output)
+    assert httpx_mock.get_requests() == []
+
+
+def test_advise_reports_an_unreachable_server(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, httpx_mock: HTTPXMock
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    seed_repository_with_findings(tmp_path, findings=[OPEN_FINDING])
+    httpx_mock.add_exception(httpx.ConnectError("injoignable"), url=OLLAMA_GENERATE_URL)
+
+    result = runner.invoke(cli.app, ["advise", "Architecturor"])
+    output = plain(result.output)
+
+    assert result.exit_code == 1
+    assert "1 dépôt(s) en échec" in output
+    assert "ollama serve" in output
+
+
+def test_advise_no_save_writes_nothing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, httpx_mock: HTTPXMock
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    seed_repository_with_findings(tmp_path, findings=[OPEN_FINDING])
+    mock_advice(httpx_mock, [{"title": "T", "recommendation": "R"}])
+
+    result = runner.invoke(cli.app, ["advise", "Architecturor", "--no-save"])
+
+    with sqlite3.connect(tmp_path / "data" / "githor.db") as connection:
+        runs = connection.execute("SELECT COUNT(*) FROM advice_runs").fetchone()[0]
+
+    assert result.exit_code == 0
+    assert runs == 0
+    assert "rien n'a été écrit en base" in plain(result.output)
+
+
+def test_advise_adds_a_new_run_instead_of_replacing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, httpx_mock: HTTPXMock
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    seed_repository_with_findings(tmp_path, findings=[OPEN_FINDING])
+    mock_advice(httpx_mock, [{"title": "T", "recommendation": "R"}], reusable=True)
+
+    runner.invoke(cli.app, ["advise", "Architecturor"])
+    runner.invoke(cli.app, ["advise", "Architecturor"])
+
+    with sqlite3.connect(tmp_path / "data" / "githor.db") as connection:
+        runs = connection.execute("SELECT COUNT(*) FROM advice_runs").fetchone()[0]
+
+    assert runs == 2
+
+
+def test_advise_rejects_an_unknown_repository(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    seed_repository_with_findings(tmp_path, findings=[OPEN_FINDING])
+
+    result = runner.invoke(cli.app, ["advise", "inconnu"])
+
+    assert result.exit_code == 1
+    assert "Repository inconnu" in plain(result.output)
+
+
+def test_advise_without_a_database_says_what_to_run(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(cli.app, ["advise"])
+
+    assert result.exit_code == 1
+    assert "githor scan" in plain(result.output)
+
+
+def test_advise_never_calls_github(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, httpx_mock: HTTPXMock
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    seed_repository_with_findings(tmp_path, findings=[OPEN_FINDING])
+    mock_advice(httpx_mock, [{"title": "T", "recommendation": "R"}])
+
+    runner.invoke(cli.app, ["advise", "Architecturor"])
+
+    hosts = {request.url.host for request in httpx_mock.get_requests()}
+    assert hosts == {"localhost"}
+
+
+def test_advise_degrades_gracefully_on_invalid_json(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, httpx_mock: HTTPXMock
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    seed_repository_with_findings(tmp_path, findings=[OPEN_FINDING])
+    httpx_mock.add_response(url=OLLAMA_GENERATE_URL, json={"response": "texte libre, pas du json"})
+
+    result = runner.invoke(cli.app, ["advise", "Architecturor"])
+    output = plain(result.output)
+
+    assert result.exit_code == 0
+    assert "non structurée" in output
+    assert "texte libre, pas du json" in output
+
+
+def test_advise_model_option_overrides_the_configured_one(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, httpx_mock: HTTPXMock
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    seed_repository_with_findings(tmp_path, findings=[OPEN_FINDING])
+    mock_advice(httpx_mock, [{"title": "T", "recommendation": "R"}])
+
+    runner.invoke(cli.app, ["advise", "Architecturor", "--model", "mistral"])
+
+    request = httpx_mock.get_requests()[0]
+    assert json.loads(request.content)["model"] == "mistral"
