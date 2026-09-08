@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 from githor import __version__
 from githor.analysis.advisor import generate_advice
 from githor.analysis.audit import audit_checkout
+from githor.analysis.portfolio_advisor import answer_question
 from githor.collectors.activity import collect_activity
 from githor.collectors.issues import collect_issues
 from githor.collectors.languages import collect_languages
@@ -1451,6 +1452,68 @@ def _compare_table(exports: Sequence[RepositoryExport]) -> Table:
 def _score_cell(value: int | None) -> str:
     """Une case vide plutôt qu'un zéro trompeur, pour un groupe jamais évalué."""
     return "—" if value is None else f"{value} %"
+
+
+@app.command("ask")
+def ask(
+    question: Annotated[
+        str,
+        typer.Argument(
+            metavar="QUESTION",
+            help="Question en langage naturel sur l'ensemble des dépôts enregistrés.",
+        ),
+    ],
+    model: Annotated[
+        str | None,
+        typer.Option("--model", help="Modèle Ollama à interroger, au lieu de celui configuré."),
+    ] = None,
+) -> None:
+    """Répond à une question sur l'ensemble du parc, en langage naturel, via Ollama (§35).
+
+    Githor résume l'état de tous les dépôts enregistrés — score, constats
+    ouverts, activité — et demande à Ollama d'y répondre en ne s'appuyant que
+    sur ce résumé. Contrairement à ``githor advise``, la réponse est une
+    prose libre : rien n'y est structurellement vérifiable, d'où le rappel
+    systématique qui l'accompagne.
+
+    Comme le reste des commandes locales, elle ne relit que la base : elle
+    n'appelle jamais GitHub, et Ollama tourne en local.
+    """
+    config = current_config()
+    if not config.storage.database.exists():
+        console.print(
+            f"Aucune base à {config.storage.database} : lancez d'abord [bold]githor scan[/bold].",
+            highlight=False,
+        )
+        raise typer.Exit(code=1)
+
+    with open_database(config) as database:
+        database.create_schema()
+        with database.session() as session:
+            dataset = build_dataset(session)
+
+    if not dataset.repositories:
+        console.print("Aucun repository enregistré : lancez d'abord [bold]githor scan[/bold].")
+        raise typer.Exit(code=1)
+
+    model_name = model or config.ollama.model
+    console.print("[bold]Githor — conseiller de parc[/bold]\n")
+
+    try:
+        with OllamaClient(config.ollama.host, timeout=config.ollama.timeout_seconds) as client:
+            with stderr_console.status("Ollama réfléchit…"):
+                answer = answer_question(
+                    client, question=question, dataset=dataset, model=model_name
+                )
+    except OllamaError as exc:
+        console.print(f"[red]Erreur :[/red] {exc}", highlight=False)
+        raise typer.Exit(code=1) from exc
+
+    console.print(answer, highlight=False)
+    console.print(
+        f"\n[dim]Réponse générée par Ollama ({model_name}) à partir de "
+        f"{dataset.repository_count} dépôt(s) enregistré(s) — à vérifier.[/dim]"
+    )
 
 
 @app.command("repos")

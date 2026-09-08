@@ -1818,3 +1818,117 @@ def test_advise_model_option_overrides_the_configured_one(
 
     request = httpx_mock.get_requests()[0]
     assert json.loads(request.content)["model"] == "mistral"
+
+
+# ── githor ask (étape 31, §35) ───────────────────────────────────────────────
+
+
+def mock_answer(httpx_mock: HTTPXMock, text: str, *, reusable: bool = False) -> None:
+    """Simule une réponse en prose libre d'Ollama à /api/generate."""
+    httpx_mock.add_response(url=OLLAMA_GENERATE_URL, json={"response": text}, is_reusable=reusable)
+
+
+def test_ask_answers_the_question(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, httpx_mock: HTTPXMock
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    seed_repository_with_findings(tmp_path, findings=[OPEN_FINDING])
+    mock_answer(httpx_mock, "Architecturor n'a pas de tests.")
+
+    result = runner.invoke(cli.app, ["ask", "Quels projets n'ont pas de tests ?"])
+    output = plain(result.output)
+
+    assert result.exit_code == 0
+    assert "Architecturor n'a pas de tests." in output
+    assert "généré" in output.lower()
+    assert "1 dépôt(s)" in output
+
+
+def test_ask_requests_plain_text_not_json(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, httpx_mock: HTTPXMock
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    seed_repository_with_findings(tmp_path, findings=[OPEN_FINDING])
+    mock_answer(httpx_mock, "Réponse.")
+
+    runner.invoke(cli.app, ["ask", "Une question ?"])
+
+    request = httpx_mock.get_requests()[0]
+    assert "format" not in json.loads(request.content)
+
+
+def test_ask_reports_an_unreachable_server(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, httpx_mock: HTTPXMock
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    seed_repository_with_findings(tmp_path, findings=[OPEN_FINDING])
+    httpx_mock.add_exception(httpx.ConnectError("injoignable"), url=OLLAMA_GENERATE_URL)
+
+    result = runner.invoke(cli.app, ["ask", "Une question ?"])
+    output = plain(result.output)
+
+    assert result.exit_code == 1
+    assert "ollama serve" in output
+
+
+def test_ask_without_a_database_says_what_to_run(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(cli.app, ["ask", "Une question ?"])
+
+    assert result.exit_code == 1
+    assert "githor scan" in plain(result.output)
+
+
+def test_ask_with_an_empty_database_says_what_to_run(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    runner.invoke(cli.app, ["db", "init"])
+
+    result = runner.invoke(cli.app, ["ask", "Une question ?"])
+
+    assert result.exit_code == 1
+    assert "githor scan" in plain(result.output)
+
+
+def test_ask_never_calls_github(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, httpx_mock: HTTPXMock
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    seed_repository_with_findings(tmp_path, findings=[OPEN_FINDING])
+    mock_answer(httpx_mock, "Réponse.")
+
+    runner.invoke(cli.app, ["ask", "Une question ?"])
+
+    hosts = {request.url.host for request in httpx_mock.get_requests()}
+    assert hosts == {"localhost"}
+
+
+def test_ask_model_option_overrides_the_configured_one(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, httpx_mock: HTTPXMock
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    seed_repository_with_findings(tmp_path, findings=[OPEN_FINDING])
+    mock_answer(httpx_mock, "Réponse.")
+
+    runner.invoke(cli.app, ["ask", "Une question ?", "--model", "mistral"])
+
+    request = httpx_mock.get_requests()[0]
+    assert json.loads(request.content)["model"] == "mistral"
+
+
+def test_ask_summarises_every_registered_repository(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, httpx_mock: HTTPXMock
+) -> None:
+    """La question porte sur tout le parc, pas seulement un dépôt nommé."""
+    monkeypatch.chdir(tmp_path)
+    seed_repository_with_findings(tmp_path, findings=[OPEN_FINDING])
+    mock_answer(httpx_mock, "Réponse.")
+
+    runner.invoke(cli.app, ["ask", "Une question ?"])
+
+    prompt = json.loads(httpx_mock.get_requests()[0].content)["prompt"]
+    assert "nouhailler/Architecturor" in prompt
