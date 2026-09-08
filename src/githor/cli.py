@@ -203,6 +203,9 @@ def config_show() -> None:
     table.add_row("audit.clone_depth", str(config.audit.clone_depth))
     table.add_row("audit.git_timeout_seconds", str(config.audit.git_timeout_seconds))
     table.add_row("audit.max_file_bytes", str(config.audit.max_file_bytes))
+    table.add_row("ollama.host", config.ollama.host)
+    table.add_row("ollama.model", config.ollama.model)
+    table.add_row("ollama.timeout_seconds", str(config.ollama.timeout_seconds))
     table.add_row("storage.database", str(config.storage.database))
     table.add_row("export.directory", str(config.export.directory))
 

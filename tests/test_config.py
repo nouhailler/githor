@@ -119,9 +119,9 @@ def test_unknown_key_is_rejected(tmp_path: Path) -> None:
 
 
 def test_unknown_section_is_rejected(tmp_path: Path) -> None:
-    path = write(tmp_path / "section.toml", "[ollama]\nmodel = 'llama3'\n")
+    path = write(tmp_path / "section.toml", "[inconnue]\nmodel = 'llama3'\n")
 
-    with pytest.raises(ConfigError, match="ollama"):
+    with pytest.raises(ConfigError, match="inconnue"):
         load_config(path, base_dir=tmp_path)
 
 
@@ -166,6 +166,50 @@ def test_api_url_requires_http_scheme(tmp_path: Path) -> None:
     path = write(tmp_path / "url.toml", '[github]\napi_url = "ftp://exemple"\n')
 
     with pytest.raises(ConfigError, match="http"):
+        load_config(path, base_dir=tmp_path)
+
+
+# ── Ollama (V0.4) ────────────────────────────────────────────────────────────
+
+
+def test_ollama_defaults_target_a_local_server(tmp_path: Path) -> None:
+    ollama = load_config(base_dir=tmp_path).ollama
+
+    assert ollama.host == "http://localhost:11434"
+    assert ollama.model == "llama3.1"
+    assert ollama.timeout_seconds == 180.0
+
+
+def test_ollama_host_is_read(tmp_path: Path) -> None:
+    path = write(tmp_path / "ollama.toml", '[ollama]\nhost = "http://autre-machine:11434"\n')
+
+    assert load_config(path, base_dir=tmp_path).ollama.host == "http://autre-machine:11434"
+
+
+def test_ollama_host_trailing_slash_is_removed(tmp_path: Path) -> None:
+    path = write(tmp_path / "ollama.toml", '[ollama]\nhost = "http://localhost:11434/"\n')
+
+    assert load_config(path, base_dir=tmp_path).ollama.host == "http://localhost:11434"
+
+
+def test_ollama_host_requires_http_scheme(tmp_path: Path) -> None:
+    path = write(tmp_path / "ollama.toml", '[ollama]\nhost = "ftp://exemple"\n')
+
+    with pytest.raises(ConfigError, match="http"):
+        load_config(path, base_dir=tmp_path)
+
+
+def test_ollama_model_is_read(tmp_path: Path) -> None:
+    path = write(tmp_path / "ollama.toml", '[ollama]\nmodel = "mistral"\n')
+
+    assert load_config(path, base_dir=tmp_path).ollama.model == "mistral"
+
+
+@pytest.mark.parametrize("seconds", [0, 3601])
+def test_ollama_timeout_is_bounded(tmp_path: Path, seconds: int) -> None:
+    path = write(tmp_path / "ollama.toml", f"[ollama]\ntimeout_seconds = {seconds}\n")
+
+    with pytest.raises(ConfigError):
         load_config(path, base_dir=tmp_path)
 
 
@@ -223,6 +267,7 @@ def test_example_file_matches_the_model() -> None:
     assert isinstance(config, Config)
     assert config.scan.commit_history_days == 90
     assert config.scan.snapshot_freshness_hours == 0
+    assert config.ollama.host == "http://localhost:11434"
 
 
 def test_gh_cli_fallback_is_enabled_by_default(tmp_path: Path) -> None:

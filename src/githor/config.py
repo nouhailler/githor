@@ -105,6 +105,30 @@ class AuditConfig(BaseModel):
     """
 
 
+class OllamaConfig(BaseModel):
+    """Serveur Ollama local utilisé par le conseiller (V0.4)."""
+
+    model_config = _STRICT
+
+    host: str = "http://localhost:11434"
+    model: str = "llama3.1"
+
+    timeout_seconds: float = Field(default=180.0, ge=1, le=3600)
+    """Délai accordé à une génération.
+
+    L'inférence locale peut prendre plusieurs minutes selon le modèle et la
+    machine ; un délai court la couperait avant qu'elle n'ait terminé.
+    """
+
+    @field_validator("host")
+    @classmethod
+    def _check_host(cls, value: str) -> str:
+        url = value.strip().rstrip("/")
+        if not url.startswith(("http://", "https://")):
+            raise ValueError("doit commencer par http:// ou https://")
+        return url
+
+
 class StorageConfig(BaseModel):
     """Emplacement de la base SQLite."""
 
@@ -132,6 +156,7 @@ class Config(BaseModel):
     github: GitHubConfig = Field(default_factory=GitHubConfig)
     scan: ScanConfig = Field(default_factory=ScanConfig)
     audit: AuditConfig = Field(default_factory=AuditConfig)
+    ollama: OllamaConfig = Field(default_factory=OllamaConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
     export: ExportConfig = Field(default_factory=ExportConfig)
 

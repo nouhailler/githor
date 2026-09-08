@@ -59,6 +59,19 @@ git_timeout_seconds = 300
 # main : l'analyser fausserait toutes les moyennes.
 max_file_bytes = 1000000
 
+[ollama]
+# Serveur Ollama local utilisé par « githor advise ». Ollama tourne toujours
+# en local : aucune donnée du dépôt n'est envoyée à un service tiers.
+host = "http://localhost:11434"
+
+# Modèle interrogé. Doit avoir été récupéré au préalable : ollama pull <modèle>.
+model = "llama3.1"
+
+# Délai accordé à une génération, en secondes (1 à 3600). L'inférence locale
+# peut prendre plusieurs minutes selon le modèle et la machine ; un délai
+# court la couperait avant qu'elle n'ait terminé.
+timeout_seconds = 180.0
+
 [storage]
 database = "data/githor.db"
 
