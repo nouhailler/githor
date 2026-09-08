@@ -163,6 +163,30 @@ recommandation reste rattachée à la règle qui l'a motivée
 Deux tables neuves, aucune colonne touchée ailleurs : comme pour la V0.2 et
 la V0.3, aucune migration n'a été nécessaire ici non plus.
 
+### Le conseiller de parc envoie tout, plutôt que de chercher
+
+`githor ask` (§35) répond à une question libre sur l'ensemble des dépôts en
+donnant à Ollama un résumé de **chacun** des ~80 dépôts enregistrés, en une
+seule fois — jamais une recherche préalable qui ne remonterait que les
+dépôts jugés pertinents (RAG). À cette échelle, tout le résumé tient en
+quelques kilo-octets, largement dans la fenêtre de contexte d'un modèle
+local ; ajouter une étape de recherche aurait été de la complexité sans
+bénéfice mesurable.
+
+Cela ne tiendra pas indéfiniment : un parc dix fois plus gros dépassera la
+fenêtre de contexte utile, et la question d'indexer/filtrer avant d'envoyer
+se reposera alors. Ce n'est pas le cas aujourd'hui, et anticiper cette limite
+maintenant aurait été de la complexité sans bénéfice mesurable — la même
+logique que celle qui a écarté les migrations tant qu'aucune colonne n'en a
+eu besoin.
+
+Contrairement à `githor advise`, la réponse produite ici n'a pas de structure
+de sortie à valider : une question libre ne se laisse pas découper en
+éléments associés un par un. Githor ne peut donc pas vérifier la réponse
+elle-même — seulement garantir que les faits qu'elle *peut* citer sont
+réels. C'est pourquoi la commande rappelle systématiquement, dans son
+affichage, que la réponse est générée et reste à vérifier.
+
 ### Un export ne remplace pas le précédent
 
 Le fichier produit est horodaté. Un export est une photographie, au même titre
@@ -254,9 +278,11 @@ La **V0.3 — Project Intelligence** est livrée (étapes 19 à 23) : catégorie
 La **V0.4 — AI Advisor** est livrée (étapes 24 à 28) : client Ollama local,
 priorisation déterministe des constats ouverts, `githor advise`, et
 persistance des recommandations produites. Premier livrable : le conseiller
-par dépôt (§33 du cahier des charges) ; le conseiller multi-dépôts en langage
-naturel (§35) reste une fonctionnalité future distincte. Le détail est dans
-le [CHANGELOG](CHANGELOG.md).
+par dépôt (§33 du cahier des charges).
+
+La **0.5.0** livre le second volet, jusque-là laissé de côté : le conseiller
+multi-dépôts en langage naturel (§35, étapes 29 à 32), `githor ask`. Le
+détail est dans le [CHANGELOG](CHANGELOG.md).
 
 ## Conventions
 
@@ -299,7 +325,8 @@ La question reste ouverte pour la V0.4.
 | V0.1 | Inventaire, snapshots, findings, exports, rapports | livrée (0.1.0) |
 | **V0.2** | Code Auditor : clone local, AST, LOC, complexité, imports, dépendances, tests | livrée |
 | **V0.3** | Project Intelligence : catégorie security, score dérivé, comparaison, historique | livrée |
-| **V0.4** | AI Advisor : client Ollama, priorisation déterministe, `githor advise` | livrée |
+| V0.4 | AI Advisor : client Ollama, priorisation déterministe, `githor advise` | livrée |
+| **0.5.0** | Conseiller de projets multi-dépôts (§35), `githor ask` | livrée |
 
 Les couches sont séparées pour cela : `github/` ne connaît ni la base ni la CLI,
 les `collectors/` font le pont vers les modèles normalisés, les `rules/` ne

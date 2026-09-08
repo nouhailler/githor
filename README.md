@@ -237,6 +237,7 @@ githor audit --no-save            # regarde sans rien écrire en base
 githor advise                     # recommandations IA pour tous les dépôts (Ollama local)
 githor advise Architecturor       # un seul dépôt
 githor advise --no-save           # regarde sans rien écrire en base
+githor ask "Question ?"           # conseiller de parc, en langage naturel (Ollama local)
 githor report NOM -o rapport.md   # le même rapport, écrit dans un fichier
 githor db init                    # crée la base SQLite et son schéma
 githor config show                # configuration effective et provenance du jeton
@@ -351,7 +352,7 @@ produit un fichier exploitable.
 │   ├── github/       # client HTTP, résolution du jeton, erreurs
 │   ├── ollama/       # client HTTP local, erreurs (V0.4, aucun service tiers)
 │   ├── vcs/          # clone local : miroir superficiel, garde-fous
-│   ├── analysis/     # lignes, AST, complexité, imports, dépendances, tests, advisor.py
+│   ├── analysis/     # lignes, AST, complexité, imports, dépendances, tests, advisor.py, portfolio_advisor.py
 │   ├── models/       # repository, snapshot, activity, release, issue, finding, code, advice
 │   ├── collectors/   # repositories, langages, structure, activité, releases, issues
 │   ├── rules/        # catalogue de règles et moteur d'évaluation
@@ -831,6 +832,51 @@ d'éléments qui ne correspond pas aux constats), Githor le montre plutôt que d
 l'inventer : la recommandation est conservée telle quelle, marquée dégradée,
 sans être rattachée à une règle précise.
 
+## Conseiller de parc
+
+```bash
+githor ask "Quels projets n'ont pas de tests ?"
+githor ask "Quel projet devrait être amélioré en priorité ?"
+githor ask "Quelles bonnes pratiques sont dans Astror mais absentes de Sociologor ?"
+githor ask "Une question ?" --model mistral   # un autre modèle que celui configuré
+```
+
+Là où `githor advise` conseille **un** dépôt, `githor ask` répond à une
+question libre sur **l'ensemble** du parc — le « conseiller de projets » du
+cahier des charges (§35). Githor résume chaque dépôt enregistré (score,
+constats ouverts, activité, présence de tests) et donne ce résumé complet à
+Ollama avec la question posée, en lui demandant explicitement de ne rien
+affirmer qui n'y figure pas et de citer les dépôts (`propriétaire/dépôt`)
+qu'il mentionne.
+
+```console
+$ githor ask "Quels projets n'ont pas de tests ?"
+Githor — conseiller de parc
+
+D'après les données fournies, nouhailler/Architecturor et nouhailler/findor
+n'ont pas de tests locaux détectés…
+
+Réponse générée par Ollama (llama3.1) à partir de 78 dépôt(s) enregistré(s) —
+à vérifier.
+```
+
+**La réponse n'est pas structurellement vérifiable**, contrairement à un
+score ou à un constat : une question libre ne se laisse pas découper en
+éléments à valider un par un. C'est pourquoi la commande rappelle
+systématiquement, en pied de réponse, qu'elle est générée. Ce que Githor
+garantit, en revanche, c'est que les faits *disponibles* pour y répondre sont
+réels — le même résumé, dépôt par dépôt, qu'on peut retrouver dans
+`githor compare`.
+
+Rien n'est stocké : contrairement à `githor advise`, poser une question ne
+laisse aucune trace en base. Comme le reste des commandes locales, elle ne
+joint jamais GitHub, et Ollama tourne en local.
+
+À l'échelle d'un parc d'une centaine de dépôts, le résumé complet tient en
+quelques kilo-octets — largement dans la fenêtre de contexte d'un modèle
+local. Aucune recherche ni indexation préalable n'a été nécessaire ; un parc
+nettement plus grand reposerait la question.
+
 ## Rapports
 
 ```bash
@@ -958,7 +1004,8 @@ Les tests n'utilisent **jamais** de token GitHub réel : le transport HTTP est m
 | V0.1 | Inventaire, métadonnées, langages, structure, activité, issues, releases, métriques, findings, snapshots, exports, rapports |
 | V0.2 | Code Auditor : clone local, AST, LOC, complexité, imports, dépendances, tests |
 | V0.3 | Project Intelligence : catégorie security, score dérivé, `githor compare`, historique |
-| **V0.4** | AI Advisor : client Ollama local, priorisation déterministe, `githor advise` |
+| V0.4 | AI Advisor : client Ollama local, priorisation déterministe, `githor advise` |
+| **0.5.0** | Conseiller de projets multi-dépôts (§35) : `githor ask`, en langage naturel |
 
 ## Licence
 

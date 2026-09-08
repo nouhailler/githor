@@ -7,7 +7,44 @@ projet respecte le [versionnement sémantique](https://semver.org/lang/fr/).
 
 Les étapes numérotées renvoient au plan de développement : les treize de la V0.1
 sont franchies, les étapes 14 à 18 constituent la V0.2, les étapes 19 à 23 la
-V0.3, et les étapes 24 à 28 la V0.4.
+V0.3, les étapes 24 à 28 la V0.4, et les étapes 29 à 32 la 0.5.0.
+
+## [0.5.0] — 2026-09-08
+
+**Conseiller de projets multi-dépôts.** La 0.4.0 conseillait un dépôt ; la
+0.5.0 répond à des questions sur l'ensemble du parc, en langage naturel —
+le §35 du cahier des charges, volontairement laissé de côté lors de la V0.4.
+
+### Ajouté
+
+- **Réponses en texte libre dans le client Ollama** *(étape 29)*.
+  - `OllamaClient.generate` gagne un paramètre `format` optionnel
+    (`"json"` par défaut, comme avant ; `None` pour l'omettre) — une réponse
+    en prose libre n'a pas à être contrainte au JSON, contrairement à ce que
+    demande `githor advise`. `githor advise` ne change pas de comportement.
+- **Résumé du parc et génération de la réponse** *(étape 30)*,
+  `githor.analysis.portfolio_advisor`.
+  - chaque dépôt enregistré est résumé en une ligne (langage, score, constats
+    ouverts, présence de tests locaux, dernière activité) depuis le même
+    `Dataset` que `githor export`/`compare` ; aucune donnée nouvelle,
+    aucun nouvel appel ;
+  - la question posée et le résumé complet du parc sont donnés à Ollama en
+    une seule fois, avec instruction explicite de ne rien affirmer qui n'y
+    figure pas et de citer les dépôts par leur nom complet ;
+  - à l'échelle d'une centaine de dépôts, le résumé tient en quelques
+    kilo-octets : aucune recherche ni indexation préalable (RAG) n'a été
+    nécessaire pour cette version.
+- **Commande `githor ask`** *(étape 31)*.
+  - `githor ask "question"` répond sur l'ensemble des dépôts enregistrés ;
+    `--model` remplace ponctuellement celui configuré ;
+  - rien n'est stocké : contrairement à `githor advise`, poser une question
+    ne laisse aucune trace en base — c'est un outil de consultation, pas une
+    mesure à préserver ;
+  - la réponse est systématiquement accompagnée d'un rappel qu'elle est
+    générée : contrairement à un score ou un constat, une réponse en prose
+    libre n'est pas structurellement vérifiable par Githor lui-même ;
+  - ne joint jamais GitHub : comme `report`, `findings`, `compare` et
+    `advise`, elle ne relit que la base.
 
 ## [0.4.0] — 2026-09-08
 
