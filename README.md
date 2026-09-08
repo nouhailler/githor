@@ -167,6 +167,11 @@ clone_depth = 1                      # profondeur du clone superficiel, 0 = tout
 git_timeout_seconds = 300            # délai accordé à chaque commande git
 max_file_bytes = 1000000             # au-delà, un fichier est compté sans être analysé
 
+[ollama]
+host = "http://localhost:11434"      # serveur Ollama local, aucune donnée envoyée ailleurs
+model = "llama3.1"                   # doit avoir été récupéré : ollama pull <modèle>
+timeout_seconds = 180.0              # délai accordé à une génération, 1 à 3600 secondes
+
 [storage]
 database = "data/githor.db"
 
@@ -229,6 +234,9 @@ githor audit                      # analyse le code de tous les dépôts
 githor audit Architecturor        # analyse détaillée d'un seul dépôt
 githor audit --offline            # analyse les miroirs déjà présents, sans réseau
 githor audit --no-save            # regarde sans rien écrire en base
+githor advise                     # recommandations IA pour tous les dépôts (Ollama local)
+githor advise Architecturor       # un seul dépôt
+githor advise --no-save           # regarde sans rien écrire en base
 githor report NOM -o rapport.md   # le même rapport, écrit dans un fichier
 githor db init                    # crée la base SQLite et son schéma
 githor config show                # configuration effective et provenance du jeton
@@ -341,9 +349,10 @@ produit un fichier exploitable.
 │   ├── errors.py     # exceptions applicatives (messages destinés à l'utilisateur)
 │   ├── logging.py    # configuration du logging (Rich, stderr)
 │   ├── github/       # client HTTP, résolution du jeton, erreurs
+│   ├── ollama/       # client HTTP local, erreurs (V0.4, aucun service tiers)
 │   ├── vcs/          # clone local : miroir superficiel, garde-fous
-│   ├── analysis/     # lignes, AST, complexité, imports, dépendances, tests
-│   ├── models/       # repository, snapshot, activity, release, issue, finding, code
+│   ├── analysis/     # lignes, AST, complexité, imports, dépendances, tests, advisor.py
+│   ├── models/       # repository, snapshot, activity, release, issue, finding, code, advice
 │   ├── collectors/   # repositories, langages, structure, activité, releases, issues
 │   ├── rules/        # catalogue de règles et moteur d'évaluation
 │   ├── scoring.py    # score dérivé des findings, jamais stocké
@@ -772,6 +781,56 @@ mois ? ».
 
 `githor audit --no-save` regarde sans écrire.
 
+## Conseiller IA
+
+```bash
+githor advise Architecturor            # recommandations pour un dépôt
+githor advise                          # tous les dépôts enregistrés
+githor advise Architecturor --no-save  # sans rien écrire en base
+githor advise Architecturor --model mistral   # un autre modèle que celui configuré
+```
+
+**Githor priorise, Ollama rédige.** L'ordre des recommandations vient des
+constats **ouverts** déjà enregistrés, triés par gravité — le même tri que les
+rapports et les exports. Ollama ne choisit jamais quoi mettre en premier : il
+rédige un titre et une recommandation pour chaque constat, dans l'ordre donné,
+et ne peut mentionner aucun fait qui ne soit pas déjà dans la liste. C'est la
+traduction directe du principe posé dès l'origine : l'IA n'arrive qu'au-dessus
+de données déjà collectées et vérifiables, jamais à leur place.
+
+```text
+1. Ajouter des tests
+   Créer un répertoire tests/ : sans tests, aucune évolution n'est vérifiable.
+   (development.tests)
+```
+
+Un dépôt sans constat ouvert n'est pas conseillé : « rien à recommander »,
+pas un résultat vide. Comme le reste des commandes locales, `githor advise` ne
+joint jamais GitHub — elle relit les constats, le score et les métriques de
+code déjà enregistrés. Le score (V0.3) et les métriques de code (V0.2) ne sont
+donnés à Ollama qu'en **contexte** : ils aident à mieux rédiger, mais ne créent
+aucune recommandation de plus.
+
+Ollama, lui, tourne **en local uniquement** — aucune API cloud, aucune donnée
+du dépôt envoyée à un service tiers. Le serveur, le modèle et le délai
+accordé à une génération se configurent dans `[ollama]` (voir
+[Configuration](#configuration)) ; `ollama pull <modèle>` le récupère au
+préalable.
+
+### Ce qui est stocké, et pourquoi
+
+Chaque exécution **ajoute** une entrée, comme un scan ajoute un snapshot ou un
+audit s'ajoute. Contrairement au score, dérivé à la volée depuis les findings
+et jamais stocké, le texte produit par Ollama **est** persisté : il coûte un
+appel au modèle et n'est pas reproductible à l'identique d'un appel à l'autre.
+Deux tables neuves (`advice_runs`, `advice_items`) suffisent — aucune colonne
+n'a été ajoutée ailleurs, et aucune migration n'a été nécessaire.
+
+Si la réponse d'Ollama n'est pas exploitable (JSON invalide, ou nombre
+d'éléments qui ne correspond pas aux constats), Githor le montre plutôt que de
+l'inventer : la recommandation est conservée telle quelle, marquée dégradée,
+sans être rattachée à une règle précise.
+
 ## Rapports
 
 ```bash
@@ -898,8 +957,8 @@ Les tests n'utilisent **jamais** de token GitHub réel : le transport HTTP est m
 |---|---|
 | V0.1 | Inventaire, métadonnées, langages, structure, activité, issues, releases, métriques, findings, snapshots, exports, rapports |
 | V0.2 | Code Auditor : clone local, AST, LOC, complexité, imports, dépendances, tests |
-| **V0.3** | Project Intelligence : catégorie security, score dérivé, `githor compare`, historique |
-| V0.4 | AI Advisor : analyse via Ollama, recommandations priorisées |
+| V0.3 | Project Intelligence : catégorie security, score dérivé, `githor compare`, historique |
+| **V0.4** | AI Advisor : client Ollama local, priorisation déterministe, `githor advise` |
 
 ## Licence
 

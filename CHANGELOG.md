@@ -6,8 +6,69 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), et le
 projet respecte le [versionnement sémantique](https://semver.org/lang/fr/).
 
 Les étapes numérotées renvoient au plan de développement : les treize de la V0.1
-sont franchies, les étapes 14 à 18 constituent la V0.2, et les étapes 19 à 23
-la V0.3.
+sont franchies, les étapes 14 à 18 constituent la V0.2, les étapes 19 à 23 la
+V0.3, et les étapes 24 à 28 la V0.4.
+
+## [0.4.0] — 2026-09-08
+
+**AI Advisor.** La 0.3.0 savait comparer les dépôts sur un score ; la 0.4.0
+les conseille. Githor priorise, Ollama rédige — la première fois que l'IA
+entre dans le projet, et seulement au-dessus de données déjà collectées et
+vérifiables, jamais à leur place.
+
+### Ajouté
+
+- **Client Ollama et configuration** *(étape 24)*, `githor.ollama`.
+  - accès à un serveur Ollama **local uniquement** : aucune authentification,
+    aucun quota, aucune donnée du dépôt envoyée à un service tiers — décision
+    prise en amont face à l'alternative d'une API cloud (OpenRouter), rejetée
+    précisément parce qu'elle aurait exporté le code hors de la machine ;
+  - timeout de connexion court (le serveur est local : soit il répond, soit
+    il ne tourne pas) et timeout total long et configurable, l'inférence
+    locale pouvant prendre plusieurs minutes ;
+  - erreurs actionnables : serveur injoignable renvoie la commande pour le
+    démarrer (`ollama serve`), modèle absent renvoie celle pour le récupérer
+    (`ollama pull <modèle>`) ;
+  - nouvelle section `[ollama]` dans la configuration (`host`, `model`,
+    `timeout_seconds`), sur le modèle exact des sections existantes.
+- **Priorisation déterministe et génération des recommandations**
+  *(étape 25)*, `githor.analysis.advisor`.
+  - **Githor priorise, Ollama rédige.** L'ordre des recommandations vient des
+    constats **ouverts** déjà enregistrés, triés par gravité — le même tri
+    que les rapports et les exports. Ollama ne choisit jamais quoi mettre en
+    premier, et ne peut mentionner aucun fait absent de cette liste ;
+  - le score (V0.3) et les métriques de code (V0.2) sont donnés à Ollama en
+    **contexte** seulement : ils aident à mieux rédiger, sans créer de
+    recommandation supplémentaire ;
+  - la réponse d'Ollama est contrainte au format JSON et associée aux
+    constats un à un ; une réponse non exploitable **dégrade** proprement —
+    le texte brut est conservé, marqué comme tel, plutôt que de faire
+    échouer le dépôt ou d'inventer une association ;
+  - un dépôt sans constat ouvert n'est pas conseillé : « rien à recommander »,
+    pas un résultat vide.
+- **Persistance des recommandations** *(étape 26)*.
+  - deux tables neuves, `advice_runs` et `advice_items`, **aucune colonne
+    ajoutée ailleurs** — le même geste que les six tables de `code_audits` en
+    V0.2 ;
+  - contrairement au score, dérivé à la volée et jamais stocké, le texte
+    produit par Ollama **est** persisté : il coûte un appel au modèle et
+    n'est pas reproductible à l'identique d'un appel à l'autre. C'est
+    l'exception qui confirme la règle posée en V0.3 — voir CONTEXT.md ;
+  - chaque exécution **ajoute** une entrée, comme un scan ajoute un snapshot :
+    elle n'écrase jamais la précédente.
+- **Commande `githor advise`** *(étape 27)*.
+  - conseille un dépôt ou tous ceux de la base, `--save/--no-save`, `--model`
+    pour remplacer ponctuellement celui configuré ;
+  - échec isolé par dépôt (serveur injoignable, modèle absent, délai dépassé) :
+    les autres dépôts continuent d'être traités, comme pour `githor audit` ;
+  - ne joint jamais GitHub : comme `report`, `findings` et `compare`, elle ne
+    relit que la base.
+
+### Documenté
+
+- `CONTEXT.md` documente l'exception : les recommandations sont stockées,
+  contrairement aux scores, parce qu'elles ne sont pas dérivables. Deux
+  tables neuves suffisent, aucune migration n'a été nécessaire.
 
 ## [0.3.0] — 2026-09-07
 

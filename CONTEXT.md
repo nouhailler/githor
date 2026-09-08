@@ -140,6 +140,29 @@ du principe ci-dessus. Le jour où un score deviendra coûteux à recalculer, ou
 où la comparaison portera sur des critères qui ne se lisent plus dans
 `findings`, la question se reposera — mais elle ne s'est pas posée ici.
 
+### Les recommandations, elles, sont stockées — jamais dérivées
+
+Exception délibérée au principe qui précède. `githor advise` (V0.4) ajoute
+deux tables neuves, `advice_runs` et `advice_items`, qui persistent le texte
+produit par Ollama. La différence avec un score tient en une phrase : un
+score se **recalcule** à l'identique depuis les findings, une recommandation
+ne le peut pas — elle coûte un appel à un modèle de langage, et deux appels
+avec le même prompt ne produisent pas forcément la même formulation. Stocker
+ce texte, c'est faire pour Ollama ce que `code_audits` fait déjà pour une
+analyse de code coûteuse : conserver le résultat d'une mesure qu'on ne peut
+pas se permettre de refaire à chaque lecture.
+
+Ce que la V0.4 ne stocke en revanche jamais, c'est l'**ordre** des
+recommandations : il reste calculé par Githor, depuis les mêmes findings
+triés par gravité qu'utilisent déjà les rapports et les exports
+(`SEVERITY_ORDER`). Ollama rédige, il ne priorise pas — c'est la
+traduction directe de « ne pas faire de magie » appliquée à l'IA : chaque
+recommandation reste rattachée à la règle qui l'a motivée
+(`AdviceItemRow.source_rule`), jamais un jugement sans source.
+
+Deux tables neuves, aucune colonne touchée ailleurs : comme pour la V0.2 et
+la V0.3, aucune migration n'a été nécessaire ici non plus.
+
 ### Un export ne remplace pas le précédent
 
 Le fichier produit est horodaté. Un export est une photographie, au même titre
@@ -226,7 +249,13 @@ tests, le tout persisté et rendu dans les rapports comme dans les exports.
 
 La **V0.3 — Project Intelligence** est livrée (étapes 19 à 23) : catégorie
 `security`, score dérivé des findings (Docs/Tests/CI/Security/Overall),
-`githor compare`, et son historique dans `githor report`. Le détail est dans
+`githor compare`, et son historique dans `githor report`.
+
+La **V0.4 — AI Advisor** est livrée (étapes 24 à 28) : client Ollama local,
+priorisation déterministe des constats ouverts, `githor advise`, et
+persistance des recommandations produites. Premier livrable : le conseiller
+par dépôt (§33 du cahier des charges) ; le conseiller multi-dépôts en langage
+naturel (§35) reste une fonctionnalité future distincte. Le détail est dans
 le [CHANGELOG](CHANGELOG.md).
 
 ## Conventions
@@ -270,7 +299,7 @@ La question reste ouverte pour la V0.4.
 | V0.1 | Inventaire, snapshots, findings, exports, rapports | livrée (0.1.0) |
 | **V0.2** | Code Auditor : clone local, AST, LOC, complexité, imports, dépendances, tests | livrée |
 | **V0.3** | Project Intelligence : catégorie security, score dérivé, comparaison, historique | livrée |
-| V0.4 | AI Advisor : analyse via Ollama, recommandations priorisées | à faire — s'appuiera sur des findings et des audits traçables |
+| **V0.4** | AI Advisor : client Ollama, priorisation déterministe, `githor advise` | livrée |
 
 Les couches sont séparées pour cela : `github/` ne connaît ni la base ni la CLI,
 les `collectors/` font le pont vers les modèles normalisés, les `rules/` ne
