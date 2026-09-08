@@ -117,6 +117,9 @@ class RepositoryRow(Base):
     code_audits: Mapped[list["CodeAuditRow"]] = relationship(
         back_populates="repository", cascade="all, delete-orphan", passive_deletes=True
     )
+    advice_runs: Mapped[list["AdviceRunRow"]] = relationship(
+        back_populates="repository", cascade="all, delete-orphan", passive_deletes=True
+    )
 
 
 class RepositorySnapshotRow(Base):
@@ -453,3 +456,57 @@ class CodeDependencyRow(Base):
     group: Mapped[str | None] = mapped_column(String(128))
 
     audit: Mapped[CodeAuditRow] = relationship(back_populates="dependencies")
+
+
+class AdviceRunRow(Base):
+    """Recommandations générées par le conseiller IA pour un repository (V0.4).
+
+    Deux tables neuves, aucune colonne ajoutée ailleurs — le même geste que les
+    six tables de ``code_audits`` en V0.2. Contrairement à un score (dérivé des
+    findings, jamais stocké), le texte produit par Ollama n'est pas dérivable :
+    il coûte un appel au modèle et n'est pas reproductible à l'identique. Un
+    appel à « githor advise » **ajoute** une entrée, comme un scan ajoute un
+    snapshot ; il n'écrase jamais le précédent.
+    """
+
+    __tablename__ = "advice_runs"
+    __table_args__ = (
+        Index("ix_advice_runs_repository_generated", "repository_id", "generated_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    repository_id: Mapped[int] = mapped_column(
+        ForeignKey("repositories.id", ondelete="CASCADE"), index=True
+    )
+
+    generated_at: Mapped[datetime] = mapped_column(UTCDateTime, index=True)
+    model: Mapped[str] = mapped_column(String(255))
+    """Modèle Ollama interrogé : la formulation n'est pas reproductible à l'identique."""
+
+    degraded: Mapped[bool] = mapped_column(Boolean, default=False)
+    """Vrai si la réponse n'a pas pu être associée aux constats un à un."""
+
+    repository: Mapped[RepositoryRow] = relationship(back_populates="advice_runs")
+    items: Mapped[list["AdviceItemRow"]] = relationship(
+        back_populates="run", cascade="all, delete-orphan", passive_deletes=True
+    )
+
+
+class AdviceItemRow(Base):
+    """Une recommandation, dans l'ordre de priorité calculé par Githor."""
+
+    __tablename__ = "advice_items"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[int] = mapped_column(
+        ForeignKey("advice_runs.id", ondelete="CASCADE"), index=True
+    )
+
+    rank: Mapped[int] = mapped_column(Integer)
+    source_rule: Mapped[str | None] = mapped_column(String(128), index=True)
+    """Règle à l'origine de cette recommandation ; nulle uniquement en cas de dégradation."""
+
+    title: Mapped[str] = mapped_column(Text)
+    recommendation: Mapped[str] = mapped_column(Text)
+
+    run: Mapped[AdviceRunRow] = relationship(back_populates="items")

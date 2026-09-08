@@ -2,6 +2,8 @@
 
 from githor.storage.database import Database
 from githor.storage.tables import (
+    AdviceItemRow,
+    AdviceRunRow,
     Base,
     CodeAuditRow,
     CodeClassRow,
@@ -20,6 +22,8 @@ from githor.storage.tables import (
 )
 
 __all__ = [
+    "AdviceItemRow",
+    "AdviceRunRow",
     "Base",
     "CodeAuditRow",
     "CodeClassRow",

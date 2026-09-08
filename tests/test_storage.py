@@ -39,6 +39,8 @@ from githor.storage.tables import (
 )
 
 EXPECTED_TABLES = [
+    "advice_items",
+    "advice_runs",
     "code_audits",
     "code_classes",
     "code_dependencies",

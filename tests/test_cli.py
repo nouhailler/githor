@@ -412,7 +412,7 @@ def test_db_init_creates_the_database(monkeypatch: pytest.MonkeyPatch, tmp_path:
     assert result.exit_code == 0
     assert (tmp_path / "data" / "githor.db").exists()
     assert "Base créée" in output
-    assert "14 table(s)" in output
+    assert "16 table(s)" in output
     assert "repository_snapshots" in output
 
 
