@@ -73,16 +73,21 @@ class OllamaClient:
 
     # ── Appel public ─────────────────────────────────────────────────────────
 
-    def generate(self, prompt: str, *, model: str) -> str:
+    def generate(self, prompt: str, *, model: str, format: str | None = "json") -> str:  # noqa: A002
         """Demande une génération à Ollama et retourne le texte produit.
 
-        La réponse est contrainte au format JSON par Ollama lui-même
-        (``format: "json"``) : décoder ce texte plus loin est la
+        Par défaut, la réponse est contrainte au format JSON par Ollama
+        lui-même (``format: "json"``) : décoder ce texte plus loin est la
         responsabilité de l'appelant, ce client ne fait que le transporter.
+        ``format=None`` l'omet, pour une réponse en prose libre — utile à un
+        conseiller qui répond à une question plutôt qu'il ne structure une
+        liste de recommandations.
 
         Args:
             prompt: texte envoyé au modèle.
             model: nom du modèle Ollama à interroger.
+            format: format demandé à Ollama, ``"json"`` par défaut ; ``None``
+                pour laisser le modèle répondre librement.
 
         Raises:
             OllamaUnavailableError: serveur injoignable ou en erreur.
@@ -91,11 +96,12 @@ class OllamaClient:
             InvalidResponseError: enveloppe HTTP illisible ou incomplète.
         """
         logger.debug("POST %s/api/generate (modèle %s)", self.host, model)
+        payload: dict[str, object] = {"model": model, "prompt": prompt, "stream": False}
+        if format is not None:
+            payload["format"] = format
+
         try:
-            response = self._client.post(
-                "/api/generate",
-                json={"model": model, "prompt": prompt, "stream": False, "format": "json"},
-            )
+            response = self._client.post("/api/generate", json=payload)
         except httpx.TimeoutException as exc:
             raise OllamaTimeoutError(
                 f"Délai dépassé lors de l'appel à Ollama ({self.host}) pour le modèle « {model} »."

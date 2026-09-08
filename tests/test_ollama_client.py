@@ -63,6 +63,20 @@ def test_generate_requests_json_and_disables_streaming(
     }
 
 
+def test_generate_omits_format_when_none_is_requested(
+    httpx_mock: HTTPXMock, client: OllamaClient
+) -> None:
+    """Une réponse en prose libre — le conseiller de parc, par exemple — n'a pas à être du JSON."""
+    httpx_mock.add_response(json={"response": "Une réponse en texte libre."})
+
+    text = client.generate("Bonjour", model=MODEL, format=None)
+
+    assert text == "Une réponse en texte libre."
+    request = httpx_mock.get_request()
+    assert request is not None
+    assert "format" not in json.loads(request.content)
+
+
 def test_an_unreachable_server_is_reported_clearly(
     httpx_mock: HTTPXMock, client: OllamaClient
 ) -> None:
