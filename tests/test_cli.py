@@ -1932,3 +1932,23 @@ def test_ask_summarises_every_registered_repository(
 
     prompt = json.loads(httpx_mock.get_requests()[0].content)["prompt"]
     assert "nouhailler/Architecturor" in prompt
+
+
+# ── githor tui (étape 35) ────────────────────────────────────────────────────
+
+
+def test_tui_is_listed_in_help() -> None:
+    result = runner.invoke(cli.app, ["--help"])
+
+    assert "tui" in plain(result.output)
+
+
+def test_tui_without_a_database_says_what_to_run(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(cli.app, ["tui"])
+
+    assert result.exit_code == 1
+    assert "githor scan" in plain(result.output)

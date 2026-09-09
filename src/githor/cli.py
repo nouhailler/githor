@@ -74,6 +74,7 @@ from githor.storage.repositories import (
     upsert_repository,
 )
 from githor.storage.tables import FindingRow, RepositoryRow
+from githor.tui.app import GithorApp
 from githor.utils.dates import format_age, utc_now
 from githor.vcs.git import Checkout, GitError, clone_url_for, ensure_checkout, git_version
 
@@ -1514,6 +1515,26 @@ def ask(
         f"\n[dim]Réponse générée par Ollama ({model_name}) à partir de "
         f"{dataset.repository_count} dépôt(s) enregistré(s) — à vérifier.[/dim]"
     )
+
+
+@app.command("tui")
+def tui() -> None:
+    """Ouvre l'interface interactive, en lecture seule, sur les dépôts enregistrés.
+
+    Liste les dépôts triés par score, comme ``githor compare`` ; le détail
+    d'un dépôt sélectionné est exactement ce que produit ``githor report``.
+    Aucune action n'est déclenchée depuis l'interface : ``scan``, ``audit``,
+    ``advise`` et ``ask`` restent des commandes séparées.
+    """
+    config = current_config()
+    if not config.storage.database.exists():
+        console.print(
+            f"Aucune base à {config.storage.database} : lancez d'abord [bold]githor scan[/bold].",
+            highlight=False,
+        )
+        raise typer.Exit(code=1)
+
+    GithorApp(config).run()
 
 
 @app.command("repos")
