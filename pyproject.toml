@@ -34,12 +34,14 @@ dependencies = [
     "rich>=13.7",
     "SQLAlchemy>=2.0",
     "pydantic>=2.7",
+    "textual>=0.60",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
     "pytest-httpx>=0.30",  # mock du transport httpx : aucun test ne touche GitHub
+    "pytest-asyncio>=0.24",  # pilote App.run_test() de Textual, asynchrone
     "ruff>=0.5",
     "mypy>=1.10",
 ]
@@ -59,6 +61,7 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
+asyncio_mode = "auto"  # App.run_test() de Textual (tests de la TUI) est asynchrone
 
 # ─────────────────────────────────────────────────────────────────────────────
 [tool.ruff]
