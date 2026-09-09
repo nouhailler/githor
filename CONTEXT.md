@@ -187,6 +187,32 @@ elle-même — seulement garantir que les faits qu'elle *peut* citer sont
 réels. C'est pourquoi la commande rappelle systématiquement, dans son
 affichage, que la réponse est générée et reste à vérifier.
 
+### L'interface graphique est une TUI, pas une application web
+
+`githor tui` (0.6.0) répond au besoin d'une interface plus confortable que la
+CLI sans rouvrir la décision prise à l'origine : « pas de service, pas de
+serveur, pas de daemon ». Une application web l'aurait exigé — même servie
+en local, elle reste un serveur qu'il faut démarrer, arrêter, et dont le port
+peut entrer en conflit avec autre chose. Une TUI [Textual](https://textual.textualize.io/)
+tient dans le même unique processus que le reste de Githor, ne joint aucun
+réseau de plus que ce qu'il joint déjà, et réutilise Rich — déjà la
+bibliothèque d'affichage de toute la CLI.
+
+Cette première version est **volontairement en lecture seule** : parcourir
+la liste des dépôts (comme `githor compare`) et le détail de chacun (comme
+`githor report`), sans déclencher `scan`/`audit`/`advise`/`ask` depuis
+l'interface. Deux raisons, l'une de fond et l'une de circonstance. De fond :
+`githor tui` ne fait pas exception au reste du projet — elle ne connaît que
+`config`, `storage`, `exporters` et `reports`, jamais `cli.py`, qui l'invoque
+en sens inverse ; le détail d'un dépôt est **exactement** le texte que rend
+`render_report`, jamais une logique de présentation propre à la TUI, pour
+qu'il ne puisse jamais diverger de ce que montre `githor report`. De
+circonstance : l'utilisateur a prévenu qu'il pourrait juger la TUI « trop
+laide ou inconfortable » — livrer d'abord le plus petit périmètre utile
+permet de juger vite, avant d'investir dans les actions, qui demanderaient en
+plus une gestion de tâches en arrière-plan et de la progression (un appel
+Ollama ou un scan ne peuvent pas bloquer l'interface).
+
 ### Un export ne remplace pas le précédent
 
 Le fichier produit est horodaté. Un export est une photographie, au même titre
@@ -281,8 +307,12 @@ persistance des recommandations produites. Premier livrable : le conseiller
 par dépôt (§33 du cahier des charges).
 
 La **0.5.0** livre le second volet, jusque-là laissé de côté : le conseiller
-multi-dépôts en langage naturel (§35, étapes 29 à 32), `githor ask`. Le
-détail est dans le [CHANGELOG](CHANGELOG.md).
+multi-dépôts en langage naturel (§35, étapes 29 à 32), `githor ask`.
+
+La **0.6.0** ajoute la première interface graphique du projet : `githor tui`
+(étapes 33 à 36), une TUI Textual en lecture seule — liste des dépôts triée
+par score, détail d'un dépôt identique à `githor report`. Le détail est dans
+le [CHANGELOG](CHANGELOG.md).
 
 ## Conventions
 
@@ -326,7 +356,8 @@ La question reste ouverte pour la V0.4.
 | **V0.2** | Code Auditor : clone local, AST, LOC, complexité, imports, dépendances, tests | livrée |
 | **V0.3** | Project Intelligence : catégorie security, score dérivé, comparaison, historique | livrée |
 | V0.4 | AI Advisor : client Ollama, priorisation déterministe, `githor advise` | livrée |
-| **0.5.0** | Conseiller de projets multi-dépôts (§35), `githor ask` | livrée |
+| 0.5.0 | Conseiller de projets multi-dépôts (§35), `githor ask` | livrée |
+| **0.6.0** | Interface graphique : TUI Textual (`githor tui`), lecture seule | livrée |
 
 Les couches sont séparées pour cela : `github/` ne connaît ni la base ni la CLI,
 les `collectors/` font le pont vers les modèles normalisés, les `rules/` ne

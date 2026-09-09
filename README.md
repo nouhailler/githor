@@ -238,6 +238,7 @@ githor advise                     # recommandations IA pour tous les dépôts (O
 githor advise Architecturor       # un seul dépôt
 githor advise --no-save           # regarde sans rien écrire en base
 githor ask "Question ?"           # conseiller de parc, en langage naturel (Ollama local)
+githor tui                        # interface interactive, en lecture seule
 githor report NOM -o rapport.md   # le même rapport, écrit dans un fichier
 githor db init                    # crée la base SQLite et son schéma
 githor config show                # configuration effective et provenance du jeton
@@ -360,6 +361,7 @@ produit un fichier exploitable.
 │   ├── storage/      # SQLAlchemy : schéma (tables.py) et session (database.py)
 │   ├── exporters/    # jeu de données, métriques dérivées, JSON, CSV, Markdown
 │   ├── reports/      # rapport Markdown d'un seul dépôt
+│   ├── tui/          # interface interactive Textual, lecture seule
 │   └── utils/        # dates et helpers
 │
 ├── tests/            # suite pytest — les appels GitHub sont toujours mockés
@@ -976,6 +978,33 @@ tube. Avec un répertoire existant en `--output`, le fichier produit est horodat
 (`githor-report-nouhailler-Architecturor-20260903-195935.md`) et n'écrase jamais
 le précédent.
 
+## Interface (TUI)
+
+```bash
+githor tui
+```
+
+Une interface interactive, en lecture seule, pour parcourir le parc sans
+enchaîner les commandes. Deux écrans, symétriques de ce que la CLI sait déjà
+faire :
+
+- **Liste** — les dépôts triés par score décroissant, comme `githor compare`
+  (Docs/Tests/CI/Security/Score, plus le langage principal). Un champ en tête
+  d'écran filtre par nom, en direct.
+- **Détail** (`↵` sur une ligne) — exactement le texte que produit
+  `githor report` pour ce dépôt, rendu avec ses tableaux. `échap` revient à
+  la liste.
+
+`q` quitte depuis n'importe quel écran. Comme le reste des commandes locales,
+`githor tui` ne relit que la base : elle n'appelle jamais GitHub, et n'écrit
+jamais rien.
+
+**Ce qu'elle ne fait pas (encore) :** aucune action ne se déclenche depuis
+l'interface. `scan`, `audit`, `advise` et `ask` restent des commandes
+séparées — les y intégrer demanderait de gérer des tâches en arrière-plan et
+leur progression sans bloquer l'affichage, ce qu'une première version en
+lecture seule n'a pas besoin de résoudre.
+
 ## Logs et diagnostic
 
 Les logs partent sur `stderr`, afin que `stdout` reste réservé aux données produites
@@ -1005,7 +1034,8 @@ Les tests n'utilisent **jamais** de token GitHub réel : le transport HTTP est m
 | V0.2 | Code Auditor : clone local, AST, LOC, complexité, imports, dépendances, tests |
 | V0.3 | Project Intelligence : catégorie security, score dérivé, `githor compare`, historique |
 | V0.4 | AI Advisor : client Ollama local, priorisation déterministe, `githor advise` |
-| **0.5.0** | Conseiller de projets multi-dépôts (§35) : `githor ask`, en langage naturel |
+| 0.5.0 | Conseiller de projets multi-dépôts (§35) : `githor ask`, en langage naturel |
+| **0.6.0** | Interface graphique : `githor tui`, une TUI Textual en lecture seule |
 
 ## Licence
 

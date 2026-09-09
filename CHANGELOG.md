@@ -7,7 +7,44 @@ projet respecte le [versionnement sémantique](https://semver.org/lang/fr/).
 
 Les étapes numérotées renvoient au plan de développement : les treize de la V0.1
 sont franchies, les étapes 14 à 18 constituent la V0.2, les étapes 19 à 23 la
-V0.3, les étapes 24 à 28 la V0.4, et les étapes 29 à 32 la 0.5.0.
+V0.3, les étapes 24 à 28 la V0.4, les étapes 29 à 32 la 0.5.0, et les étapes
+33 à 36 la 0.6.0.
+
+## [0.6.0] — 2026-09-09
+
+**Interface graphique.** Première interface autre que la CLI : une TUI
+[Textual](https://textual.textualize.io/), en lecture seule. Le choix d'une
+TUI plutôt qu'une application web tient au principe posé dès l'origine —
+pas de service, pas de serveur, pas de daemon.
+
+### Ajouté
+
+- **Squelette de l'application et écran de liste** *(étape 33)*,
+  `githor.tui`.
+  - `RepositoryListScreen` : un tableau des dépôts triés par score
+    décroissant, les mêmes colonnes que `githor compare`, construit depuis
+    le même `Dataset` — aucune donnée ni requête nouvelle ;
+  - un champ filtre le tableau par nom de dépôt, en direct ;
+  - base présente mais vide : un écran dédié plutôt qu'un tableau blanc
+    silencieux.
+- **Écran de détail d'un dépôt** *(étape 34)*.
+  - `RepositoryDetailScreen` affiche **exactement** le texte que produit
+    `githor report` pour le dépôt sélectionné (`build_report` +
+    `render_report`, sans logique de rendu propre à la TUI), dans un
+    widget Markdown natif — tableaux compris, défilement natif ;
+  - ne peut donc jamais diverger de ce que montre la commande `report`.
+- **Commande `githor tui`** *(étape 35)*.
+  - base absente : échoue avant même d'ouvrir l'interface, comme les autres
+    commandes ;
+  - lecture seule, assumée : aucune action (`scan`, `audit`, `advise`,
+    `ask`) ne se déclenche depuis l'interface dans cette version.
+
+### Documenté
+
+- `CONTEXT.md` documente le choix d'une TUI plutôt qu'une application web,
+  et le périmètre volontairement restreint (lecture seule) de cette
+  première version — livrer le plus petit périmètre utile avant d'investir
+  dans des actions qui demanderaient une gestion de tâches en arrière-plan.
 
 ## [0.5.0] — 2026-09-08
 
