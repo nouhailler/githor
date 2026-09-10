@@ -11,6 +11,9 @@ build/
 dist/
 .eggs/
 
+# ── Paquet .deb (packaging/build-deb.sh) : joint aux releases, jamais versionné
+*.deb
+
 # ── Outils ───────────────────────────────────────────────────────────────────
 .pytest_cache/
 .ruff_cache/
