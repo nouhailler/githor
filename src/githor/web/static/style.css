@@ -1,0 +1,261 @@
+/* Githor — interface web locale. Feuille de style écrite à la main, servie
+   localement : aucune ressource externe, l'interface reste utilisable hors
+   ligne. */
+
+:root {
+  --bg: #f7f7fa;
+  --surface: #ffffff;
+  --border: #e2e2e8;
+  --text: #1c1c24;
+  --text-dim: #6b6b76;
+  --accent: #4f5bd5;
+  --high: #1a7f4e;
+  --high-bg: #e5f6ee;
+  --medium: #9a6a00;
+  --medium-bg: #fdf1da;
+  --low: #b23b3b;
+  --low-bg: #fbe9e9;
+  --none-bg: #ececf1;
+  --none-text: #6b6b76;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14141a;
+    --surface: #1c1c24;
+    --border: #2e2e38;
+    --text: #eceef2;
+    --text-dim: #9a9aa6;
+    --accent: #8b93ff;
+    --high: #58d68d;
+    --high-bg: #163a29;
+    --medium: #f0c261;
+    --medium-bg: #3a2f10;
+    --low: #f0807f;
+    --low-bg: #3a1616;
+    --none-bg: #2a2a33;
+    --none-text: #9a9aa6;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.5 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+.site-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.site-header .brand {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.site-header .tagline {
+  color: var(--text-dim);
+  font-size: 0.9rem;
+}
+
+main {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 1.5rem;
+}
+
+.site-footer {
+  max-width: 1100px;
+  margin: 2rem auto 1rem;
+  padding: 0 1.5rem;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.toolbar input[type="search"] {
+  flex: 1;
+  max-width: 320px;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.95rem;
+}
+
+.toolbar .count {
+  color: var(--text-dim);
+  font-size: 0.9rem;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+th, td {
+  padding: 0.55rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+
+th {
+  color: var(--text-dim);
+  font-weight: 600;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+th.num, td.num {
+  text-align: right;
+}
+
+tbody tr:last-child td {
+  border-bottom: none;
+}
+
+tbody tr:hover {
+  background: var(--bg);
+}
+
+.badge {
+  display: inline-block;
+  padding: 0.05rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  margin-left: 0.4rem;
+}
+
+.badge-muted {
+  background: var(--none-bg);
+  color: var(--none-text);
+}
+
+.score {
+  display: inline-block;
+  min-width: 3.5rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-weight: 600;
+  font-size: 0.85rem;
+  text-align: center;
+}
+
+.score-high {
+  background: var(--high-bg);
+  color: var(--high);
+}
+
+.score-medium {
+  background: var(--medium-bg);
+  color: var(--medium);
+}
+
+.score-low {
+  background: var(--low-bg);
+  color: var(--low);
+}
+
+.score-none {
+  background: var(--none-bg);
+  color: var(--none-text);
+}
+
+.check-ok::before {
+  content: "✓ ";
+  color: var(--high);
+}
+
+.check-missing::before {
+  content: "✗ ";
+  color: var(--low);
+}
+
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 0.75rem;
+  margin: 1rem 0;
+}
+
+.metric {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.6rem 0.8rem;
+}
+
+.metric .label {
+  display: block;
+  color: var(--text-dim);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.metric .value {
+  display: block;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+section {
+  margin: 2rem 0;
+}
+
+section h2 {
+  font-size: 1.05rem;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.4rem;
+}
+
+.back-link {
+  display: inline-block;
+  margin-bottom: 1rem;
+}
+
+.finding {
+  margin: 0.35rem 0;
+}
+
+.finding .recommendation {
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+.repo-meta {
+  color: var(--text-dim);
+  margin: 0.25rem 0 1rem;
+}

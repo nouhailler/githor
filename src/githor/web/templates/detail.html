@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+
+{% block title %}Githor — {{ repository.full_name }}{% endblock %}
+
+{% block content %}
+<a class="back-link" href="{{ url_for('index') }}">&larr; Tous les dépôts</a>
+
+<h1>
+  {{ repository.full_name }}
+  {% if repository.archived %}<span class="badge badge-muted">archivé</span>{% endif %}
+  {% if repository.fork %}<span class="badge badge-muted">fork</span>{% endif %}
+</h1>
+{% if repository.description %}<p class="repo-meta">{{ repository.description }}</p>{% endif %}
+<p class="repo-meta">
+  <a href="{{ repository.url }}">{{ repository.url }}</a>
+  — {{ repository.visibility }} · branche <code>{{ repository.default_branch }}</code>
+</p>
+
+{% if repository.snapshot %}
+<section>
+  <h2>Vue d'ensemble</h2>
+  <p class="repo-meta">D'après le snapshot du {{ repository.snapshot.collected_at | moment }}.</p>
+  <div class="metrics">
+    <div class="metric"><span class="label">Fichiers</span><span class="value">{{ repository.metrics.files }}</span></div>
+    <div class="metric"><span class="label">Répertoires</span><span class="value">{{ repository.metrics.directories }}</span></div>
+    <div class="metric"><span class="label">Langages</span><span class="value">{{ repository.metrics.languages }}</span></div>
+    <div class="metric"><span class="label">Taille (kB)</span><span class="value">{{ repository.snapshot.size_kb }}</span></div>
+    <div class="metric"><span class="label">Étoiles</span><span class="value">{{ repository.snapshot.stars }}</span></div>
+    <div class="metric"><span class="label">Forks</span><span class="value">{{ repository.snapshot.forks }}</span></div>
+    <div class="metric"><span class="label">Commits (30j)</span><span class="value">{{ repository.metrics.commits_30_days }}</span></div>
+    <div class="metric"><span class="label">Commits (90j)</span><span class="value">{{ repository.metrics.commits_90_days }}</span></div>
+    <div class="metric"><span class="label">Issues ouvertes</span><span class="value">{{ repository.metrics.open_issues }}</span></div>
+    <div class="metric"><span class="label">Releases</span><span class="value">{{ repository.metrics.releases }}</span></div>
+  </div>
+</section>
+
+{% if repository.languages %}
+<section>
+  <h2>Langages</h2>
+  <ul>
+    {% for language in repository.languages %}
+    <li>{{ language.language }} — {{ "%.1f" | format(language.percentage) }} %</li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+{% else %}
+<p>Aucun snapshot enregistré pour ce dépôt : lancez <code>githor scan {{ repository.name }}</code>.</p>
+{% endif %}
+
+{% if report.code %}
+<section>
+  <h2>Code</h2>
+  <p class="repo-meta">
+    D'après l'audit du {{ report.code.analysed_at | moment }}, commit
+    <code>{{ report.code.short_commit }}</code> sur <code>{{ report.code.branch }}</code>.
+  </p>
+  <div class="metrics">
+    <div class="metric"><span class="label">Fichiers analysés</span><span class="value">{{ report.code.files_analysed }}</span></div>
+    <div class="metric"><span class="label">Lignes de code</span><span class="value">{{ report.code.lines.code }}</span></div>
+    <div class="metric"><span class="label">Fonctions</span><span class="value">{{ report.code.function_count }}</span></div>
+    <div class="metric"><span class="label">Classes</span><span class="value">{{ report.code.class_count }}</span></div>
+    <div class="metric"><span class="label">Complexité moy.</span><span class="value">{{ report.code.average_complexity if report.code.average_complexity is not none else "—" }}</span></div>
+    <div class="metric"><span class="label">Tests</span><span class="value">{{ report.code.tests.files if report.code.tests.exists else "aucun" }}</span></div>
+    <div class="metric"><span class="label">Dépendances</span><span class="value">{{ report.code.dependencies | length }}</span></div>
+  </div>
+</section>
+{% else %}
+<section>
+  <h2>Code</h2>
+  <p>Aucune analyse de code enregistrée : lancez <code>githor audit {{ repository.name }}</code>.</p>
+</section>
+{% endif %}
+
+{% if repository.score %}
+<section>
+  <h2>Score</h2>
+  <table>
+    <thead><tr><th class="num">Docs</th><th class="num">Tests</th><th class="num">CI</th><th class="num">Security</th><th class="num">Overall</th></tr></thead>
+    <tbody>
+      <tr>
+        <td class="num">{{ repository.score.docs | score_cell }}</td>
+        <td class="num">{{ repository.score.tests | score_cell }}</td>
+        <td class="num">{{ repository.score.ci | score_cell }}</td>
+        <td class="num">{{ repository.score.security | score_cell }}</td>
+        <td class="num">{{ repository.score.overall | score_badge }}</td>
+      </tr>
+    </tbody>
+  </table>
+
+  {% set scored_history = report.score_history | selectattr("score") | list %}
+  {% if scored_history | length > 1 %}
+  <h3>Évolution du score</h3>
+  <table>
+    <thead><tr><th>Date</th><th class="num">Overall</th></tr></thead>
+    <tbody>
+      {% for entry in scored_history %}
+      <tr><td>{{ entry.collected_at | moment }}</td><td class="num">{{ entry.score.overall | score_cell }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</section>
+{% endif %}
+
+<section>
+  <h2>Vérifications</h2>
+  {% if checks %}
+    {% for group in checks %}
+    <h3>{{ group.label }}</h3>
+    <ul>
+      {% for item in group.items %}
+      <li class="{{ 'check-ok' if item.satisfied else 'check-missing' }}">{{ item.label }}</li>
+      {% endfor %}
+    </ul>
+    {% endfor %}
+  {% else %}
+  <p>Aucun constat enregistré pour ce snapshot.</p>
+  {% endif %}
+</section>
+
+<section>
+  <h2>Constats</h2>
+  {% if open_findings %}
+    {% for label, findings in open_findings %}
+    <h3>{{ label }}</h3>
+    {% for finding in findings %}
+    <p class="finding">
+      {{ finding.message }} <code>{{ finding.rule }}</code>
+      {% if finding.recommendation %}<br><span class="recommendation">{{ finding.recommendation }}</span>{% endif %}
+    </p>
+    {% endfor %}
+    {% endfor %}
+  {% else %}
+  <p>Aucun constat ouvert.</p>
+  {% endif %}
+</section>
+
+{% if repository.releases %}
+<section>
+  <h2>Releases</h2>
+  <table>
+    <thead><tr><th>Tag</th><th>Nom</th><th>Publiée le</th><th>État</th></tr></thead>
+    <tbody>
+      {% for release in repository.releases %}
+      <tr>
+        <td><code>{{ release.tag }}</code></td>
+        <td>{{ release.name or "—" }}</td>
+        <td>{{ release.published_at | moment }}</td>
+        <td>{{ "brouillon" if release.draft else ("préversion" if release.prerelease else "publiée") }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
+<section>
+  <h2>Historique</h2>
+  {% if report.snapshots <= 1 %}
+  <p>Premier snapshot : aucun historique à comparer.</p>
+  {% else %}
+  <p>{{ report.snapshots }} snapshots conservés, depuis le {{ report.first_snapshot_at | moment }}.</p>
+  {% endif %}
+  {% if report.audits %}
+  <p>{{ report.audits }} audit(s) de code conservé(s).</p>
+  {% endif %}
+</section>
+{% endblock %}

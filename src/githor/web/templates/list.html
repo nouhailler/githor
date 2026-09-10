@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block title %}Githor — dépôts{% endblock %}
+
+{% block content %}
+<div class="toolbar">
+  <input type="search" id="filter" placeholder="Filtrer par nom…" autocomplete="off" autofocus>
+  <span class="count" id="count">{{ repositories | length }} dépôt(s)</span>
+</div>
+
+<table class="repositories">
+  <thead>
+    <tr>
+      <th>Projet</th>
+      <th>Langage</th>
+      <th class="num">Docs</th>
+      <th class="num">Tests</th>
+      <th class="num">CI</th>
+      <th class="num">Security</th>
+      <th class="num">Score</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for export in repositories %}
+    <tr data-name="{{ export.full_name | lower }}">
+      <td>
+        <a href="{{ url_for('detail', full_name=export.full_name) }}">{{ export.full_name }}</a>
+        {% if export.archived %}<span class="badge badge-muted">archivé</span>{% endif %}
+      </td>
+      <td>{{ export.snapshot.primary_language if export.snapshot else "—" }}</td>
+      <td class="num">{{ (export.score.docs if export.score else none) | score_cell }}</td>
+      <td class="num">{{ (export.score.tests if export.score else none) | score_cell }}</td>
+      <td class="num">{{ (export.score.ci if export.score else none) | score_cell }}</td>
+      <td class="num">{{ (export.score.security if export.score else none) | score_cell }}</td>
+      <td class="num">{{ (export.score.overall if export.score else none) | score_badge }}</td>
+    </tr>
+    {% else %}
+    <tr>
+      <td colspan="7">Aucun repository enregistré : lancez <code>githor scan</code>.</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+{% endblock %}
