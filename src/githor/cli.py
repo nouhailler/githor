@@ -6,6 +6,7 @@ exceptions en messages lisibles. La logique métier vit dans les autres couches.
 """
 
 import sys
+import webbrowser
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -77,6 +78,7 @@ from githor.storage.tables import FindingRow, RepositoryRow
 from githor.tui.app import GithorApp
 from githor.utils.dates import format_age, utc_now
 from githor.vcs.git import Checkout, GitError, clone_url_for, ensure_checkout, git_version
+from githor.web.app import create_app
 
 console = Console()
 stderr_console = Console(stderr=True)
@@ -214,6 +216,8 @@ def config_show() -> None:
     table.add_row("ollama.host", config.ollama.host)
     table.add_row("ollama.model", config.ollama.model)
     table.add_row("ollama.timeout_seconds", str(config.ollama.timeout_seconds))
+    table.add_row("web.host", config.web.host)
+    table.add_row("web.port", str(config.web.port))
     table.add_row("storage.database", str(config.storage.database))
     table.add_row("export.directory", str(config.export.directory))
 
@@ -1535,6 +1539,52 @@ def tui() -> None:
         raise typer.Exit(code=1)
 
     GithorApp(config).run()
+
+
+@app.command("web")
+def web(
+    host: Annotated[
+        str | None,
+        typer.Option("--host", help="Adresse d'écoute, au lieu de celle configurée."),
+    ] = None,
+    port: Annotated[
+        int | None,
+        typer.Option("--port", help="Port d'écoute, au lieu de celui configuré."),
+    ] = None,
+    open_browser: Annotated[
+        bool,
+        typer.Option(
+            "--browser/--no-browser", help="Ouvre le navigateur au démarrage. Activé par défaut."
+        ),
+    ] = True,
+) -> None:
+    """Ouvre l'interface web, en lecture seule, sur les dépôts enregistrés.
+
+    Comme ``githor tui``, mais dans le navigateur : liste triée par score,
+    détail identique à ``githor report``. Le serveur n'écoute que sur la
+    machine locale par défaut — jamais exposé sur le réseau — et la commande
+    bloque le terminal tant qu'elle tourne : ``Ctrl+C`` l'arrête.
+    """
+    config = current_config()
+    if not config.storage.database.exists():
+        console.print(
+            f"Aucune base à {config.storage.database} : lancez d'abord [bold]githor scan[/bold].",
+            highlight=False,
+        )
+        raise typer.Exit(code=1)
+
+    web_host = host or config.web.host
+    web_port = port or config.web.port
+    url = f"http://{web_host}:{web_port}"
+
+    console.print(
+        f"Interface ouverte sur [bold]{url}[/bold] — [dim]Ctrl+C pour arrêter.[/dim]",
+        highlight=False,
+    )
+    if open_browser:
+        webbrowser.open(url)
+
+    create_app(config).run(host=web_host, port=web_port, debug=False)
 
 
 @app.command("repos")

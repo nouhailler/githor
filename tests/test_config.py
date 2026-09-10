@@ -213,6 +213,36 @@ def test_ollama_timeout_is_bounded(tmp_path: Path, seconds: int) -> None:
         load_config(path, base_dir=tmp_path)
 
 
+# ── Interface web (0.7.0) ────────────────────────────────────────────────────
+
+
+def test_web_defaults_to_localhost_only(tmp_path: Path) -> None:
+    web = load_config(base_dir=tmp_path).web
+
+    assert web.host == "127.0.0.1"
+    assert web.port == 8765
+
+
+def test_web_host_is_read(tmp_path: Path) -> None:
+    path = write(tmp_path / "web.toml", '[web]\nhost = "0.0.0.0"\n')
+
+    assert load_config(path, base_dir=tmp_path).web.host == "0.0.0.0"
+
+
+def test_web_port_is_read(tmp_path: Path) -> None:
+    path = write(tmp_path / "web.toml", "[web]\nport = 9000\n")
+
+    assert load_config(path, base_dir=tmp_path).web.port == 9000
+
+
+@pytest.mark.parametrize("port", [0, 65536])
+def test_web_port_is_bounded(tmp_path: Path, port: int) -> None:
+    path = write(tmp_path / "web.toml", f"[web]\nport = {port}\n")
+
+    with pytest.raises(ConfigError):
+        load_config(path, base_dir=tmp_path)
+
+
 # ── Résolution des chemins ───────────────────────────────────────────────────
 
 
@@ -268,6 +298,7 @@ def test_example_file_matches_the_model() -> None:
     assert config.scan.commit_history_days == 90
     assert config.scan.snapshot_freshness_hours == 0
     assert config.ollama.host == "http://localhost:11434"
+    assert config.web.port == 8765
 
 
 def test_gh_cli_fallback_is_enabled_by_default(tmp_path: Path) -> None:

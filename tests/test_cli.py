@@ -1952,3 +1952,23 @@ def test_tui_without_a_database_says_what_to_run(
 
     assert result.exit_code == 1
     assert "githor scan" in plain(result.output)
+
+
+# ── githor web (étape 39) ────────────────────────────────────────────────────
+
+
+def test_web_is_listed_in_help() -> None:
+    result = runner.invoke(cli.app, ["--help"])
+
+    assert "web" in plain(result.output)
+
+
+def test_web_without_a_database_says_what_to_run(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(cli.app, ["web"])
+
+    assert result.exit_code == 1
+    assert "githor scan" in plain(result.output)

@@ -72,6 +72,14 @@ model = "llama3.1"
 # court la couperait avant qu'elle n'ait terminé.
 timeout_seconds = 180.0
 
+[web]
+# Adresse d'écoute de « githor web ». Reste sur la machine locale par défaut :
+# jamais exposée sur le réseau, même si la valeur peut être changée ici.
+host = "127.0.0.1"
+
+# Port d'écoute (1 à 65535).
+port = 8765
+
 [storage]
 database = "data/githor.db"
 

@@ -129,6 +129,17 @@ class OllamaConfig(BaseModel):
         return url
 
 
+class WebConfig(BaseModel):
+    """Interface web locale (``githor web``, 0.7.0)."""
+
+    model_config = _STRICT
+
+    host: str = "127.0.0.1"
+    """N'écoute que sur la machine locale par défaut : jamais exposée sur le réseau."""
+
+    port: int = Field(default=8765, ge=1, le=65535)
+
+
 class StorageConfig(BaseModel):
     """Emplacement de la base SQLite."""
 
@@ -157,6 +168,7 @@ class Config(BaseModel):
     scan: ScanConfig = Field(default_factory=ScanConfig)
     audit: AuditConfig = Field(default_factory=AuditConfig)
     ollama: OllamaConfig = Field(default_factory=OllamaConfig)
+    web: WebConfig = Field(default_factory=WebConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
     export: ExportConfig = Field(default_factory=ExportConfig)
 
