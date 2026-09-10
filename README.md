@@ -5,15 +5,12 @@ GitHub, d'en collecter les métadonnées, d'en suivre l'évolution dans le temps
 (*snapshots*), d'en analyser le code source, d'en extraire des métriques et de
 détecter ce qui manque à chaque projet (*findings*).
 
-> **État : V0.2 — Code Auditor.** La [0.1.0](CHANGELOG.md) a livré l'inventaire :
-> `githor scan` collecte métadonnées, langages, arborescence, activité, releases
-> et issues, puis évalue les règles ; `githor findings` montre ce qui manque,
-> `githor export` produit du JSON, du CSV et du Markdown, et `githor report`
-> le rapport d'un dépôt.
->
-> La V0.2 y ajoute l'analyse du code lui-même : `githor mirror` clone les dépôts
-> localement, `githor audit` en lit les lignes, la structure, la complexité, les
-> imports, les dépendances déclarées et les tests.
+> **État : 0.7.0.** L'inventaire (`scan`, `findings`, `export`, `report`),
+> l'analyse du code (`mirror`, `audit`), la comparaison et le score dérivé des
+> constats (`compare`), le conseiller IA par dépôt et sur l'ensemble du parc
+> (`advise`, `ask`, via un modèle Ollama local), et une interface web locale
+> en lecture seule (`web`) sont livrés. Détail complet dans le
+> [CHANGELOG](CHANGELOG.md).
 
 Pour aller plus loin : [CONTEXT.md](CONTEXT.md) explique les partis pris et
 les invariants du projet, [CHANGELOG.md](CHANGELOG.md) retrace ce qui a été
@@ -172,6 +169,10 @@ host = "http://localhost:11434"      # serveur Ollama local, aucune donnée envo
 model = "llama3.1"                   # doit avoir été récupéré : ollama pull <modèle>
 timeout_seconds = 180.0              # délai accordé à une génération, 1 à 3600 secondes
 
+[web]
+host = "127.0.0.1"                   # jamais exposé sur le réseau par défaut
+port = 8765
+
 [storage]
 database = "data/githor.db"
 
@@ -238,7 +239,8 @@ githor advise                     # recommandations IA pour tous les dépôts (O
 githor advise Architecturor       # un seul dépôt
 githor advise --no-save           # regarde sans rien écrire en base
 githor ask "Question ?"           # conseiller de parc, en langage naturel (Ollama local)
-githor tui                        # interface interactive, en lecture seule
+githor web                        # interface web locale, en lecture seule
+githor tui                        # interface en terminal, alternative non recommandée
 githor report NOM -o rapport.md   # le même rapport, écrit dans un fichier
 githor db init                    # crée la base SQLite et son schéma
 githor config show                # configuration effective et provenance du jeton
@@ -361,7 +363,8 @@ produit un fichier exploitable.
 │   ├── storage/      # SQLAlchemy : schéma (tables.py) et session (database.py)
 │   ├── exporters/    # jeu de données, métriques dérivées, JSON, CSV, Markdown
 │   ├── reports/      # rapport Markdown d'un seul dépôt
-│   ├── tui/          # interface interactive Textual, lecture seule
+│   ├── web/          # interface web Flask, lecture seule (recommandée)
+│   ├── tui/          # interface en terminal Textual, lecture seule (alternative)
 │   └── utils/        # dates et helpers
 │
 ├── tests/            # suite pytest — les appels GitHub sont toujours mockés
@@ -978,32 +981,55 @@ tube. Avec un répertoire existant en `--output`, le fichier produit est horodat
 (`githor-report-nouhailler-Architecturor-20260903-195935.md`) et n'écrase jamais
 le précédent.
 
-## Interface (TUI)
+## Interface web
+
+```bash
+githor web                       # ouvre le navigateur sur http://127.0.0.1:8765
+githor web --no-browser          # sans ouvrir automatiquement d'onglet
+githor web --host 0.0.0.0 --port 9000   # écoute et port différents, ponctuellement
+```
+
+Une interface locale, en lecture seule, pour parcourir le parc plus
+confortablement qu'en enchaînant des commandes. Deux pages, symétriques de ce
+que la CLI sait déjà faire :
+
+- **Liste** (`/`) — les dépôts triés par score décroissant, comme
+  `githor compare` (Docs/Tests/CI/Security/Score, plus le langage principal),
+  avec un score global mis en valeur par une pastille colorée. Un champ filtre
+  la liste par nom, en direct, sans aller-retour serveur.
+- **Détail** (`/repos/<dépôt>`) — construit depuis le **même** `Report` que
+  `githor report`/`githor tui` : vue d'ensemble, langages, code, score et son
+  historique, vérifications par catégorie, constats ouverts, releases. Rendu
+  en HTML plutôt qu'en Markdown, mais jamais recalculé différemment.
+
+**`Ctrl+C` arrête le serveur** — la commande bloque le terminal tant qu'elle
+tourne, comme `python -m http.server`. Par défaut, le serveur n'écoute que
+sur `127.0.0.1` : jamais exposé sur le réseau. Aucune ressource (CSS, JS)
+n'est chargée depuis un CDN, afin que l'interface reste utilisable hors
+ligne. Comme le reste des commandes locales, `githor web` ne relit que la
+base : elle n'appelle jamais GitHub, et n'écrit jamais rien.
+
+**Ce qu'elle ne fait pas (encore) :** aucune action ne se déclenche depuis
+l'interface. `scan`, `audit`, `advise` et `ask` restent des commandes
+séparées — les y intégrer demanderait de gérer des tâches en arrière-plan et
+leur progression sans bloquer la page, ce qu'une première version en lecture
+seule n'a pas besoin de résoudre.
+
+### Interface en terminal (TUI)
 
 ```bash
 githor tui
 ```
 
-Une interface interactive, en lecture seule, pour parcourir le parc sans
-enchaîner les commandes. Deux écrans, symétriques de ce que la CLI sait déjà
-faire :
-
-- **Liste** — les dépôts triés par score décroissant, comme `githor compare`
-  (Docs/Tests/CI/Security/Score, plus le langage principal). Un champ en tête
-  d'écran filtre par nom, en direct.
-- **Détail** (`↵` sur une ligne) — exactement le texte que produit
-  `githor report` pour ce dépôt, rendu avec ses tableaux. `échap` revient à
-  la liste.
-
-`q` quitte depuis n'importe quel écran. Comme le reste des commandes locales,
-`githor tui` ne relit que la base : elle n'appelle jamais GitHub, et n'écrit
-jamais rien.
-
-**Ce qu'elle ne fait pas (encore) :** aucune action ne se déclenche depuis
-l'interface. `scan`, `audit`, `advise` et `ask` restent des commandes
-séparées — les y intégrer demanderait de gérer des tâches en arrière-plan et
-leur progression sans bloquer l'affichage, ce qu'une première version en
-lecture seule n'a pas besoin de résoudre.
+Une TUI [Textual](https://textual.textualize.io/), même contenu que
+l'interface web (liste triée par score, détail identique à `githor report`),
+livrée en premier puis reléguée au second plan : jugée trop pauvre
+visuellement à l'usage, et avec un défaut connu — le focus initial est dans
+le champ de filtre, qui capture toutes les touches, y compris `q` : le
+raccourci pour quitter peut sembler ne rien faire s'il est tapé alors que le
+filtre a le focus (`Ctrl+C` fonctionne toujours). `githor web` est
+l'interface recommandée ; celle-ci reste disponible mais n'est plus mise en
+avant.
 
 ## Logs et diagnostic
 
@@ -1035,7 +1061,8 @@ Les tests n'utilisent **jamais** de token GitHub réel : le transport HTTP est m
 | V0.3 | Project Intelligence : catégorie security, score dérivé, `githor compare`, historique |
 | V0.4 | AI Advisor : client Ollama local, priorisation déterministe, `githor advise` |
 | 0.5.0 | Conseiller de projets multi-dépôts (§35) : `githor ask`, en langage naturel |
-| **0.6.0** | Interface graphique : `githor tui`, une TUI Textual en lecture seule |
+| 0.6.0 | Interface graphique : `githor tui`, une TUI Textual en lecture seule |
+| **0.7.0** | Interface web locale : `githor web`, en lecture seule (recommandée) |
 
 ## Licence
 

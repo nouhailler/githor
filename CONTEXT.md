@@ -187,31 +187,44 @@ elle-même — seulement garantir que les faits qu'elle *peut* citer sont
 réels. C'est pourquoi la commande rappelle systématiquement, dans son
 affichage, que la réponse est générée et reste à vérifier.
 
-### L'interface graphique est une TUI, pas une application web
+### L'interface graphique : une TUI d'abord, un choix révisé ensuite
 
-`githor tui` (0.6.0) répond au besoin d'une interface plus confortable que la
-CLI sans rouvrir la décision prise à l'origine : « pas de service, pas de
-serveur, pas de daemon ». Une application web l'aurait exigé — même servie
-en local, elle reste un serveur qu'il faut démarrer, arrêter, et dont le port
-peut entrer en conflit avec autre chose. Une TUI [Textual](https://textual.textualize.io/)
+`githor tui` (0.6.0) a d'abord répondu au besoin d'une interface plus
+confortable que la CLI sans rouvrir la décision prise à l'origine : « pas de
+service, pas de serveur, pas de daemon ». Une TUI [Textual](https://textual.textualize.io/)
 tient dans le même unique processus que le reste de Githor, ne joint aucun
-réseau de plus que ce qu'il joint déjà, et réutilise Rich — déjà la
-bibliothèque d'affichage de toute la CLI.
+réseau de plus que ce qu'il joint déjà, et réutilise Rich.
 
-Cette première version est **volontairement en lecture seule** : parcourir
-la liste des dépôts (comme `githor compare`) et le détail de chacun (comme
-`githor report`), sans déclencher `scan`/`audit`/`advise`/`ask` depuis
-l'interface. Deux raisons, l'une de fond et l'une de circonstance. De fond :
-`githor tui` ne fait pas exception au reste du projet — elle ne connaît que
-`config`, `storage`, `exporters` et `reports`, jamais `cli.py`, qui l'invoque
-en sens inverse ; le détail d'un dépôt est **exactement** le texte que rend
-`render_report`, jamais une logique de présentation propre à la TUI, pour
-qu'il ne puisse jamais diverger de ce que montre `githor report`. De
-circonstance : l'utilisateur a prévenu qu'il pourrait juger la TUI « trop
-laide ou inconfortable » — livrer d'abord le plus petit périmètre utile
-permet de juger vite, avant d'investir dans les actions, qui demanderaient en
-plus une gestion de tâches en arrière-plan et de la progression (un appel
-Ollama ou un scan ne peuvent pas bloquer l'interface).
+**À l'usage, elle a été jugée trop pauvre visuellement**, et portait un bug
+réel : le focus tombait par défaut dans le champ de filtre, qui capture
+toutes les touches imprimables — `q` pour quitter s'y tapait au lieu de
+déclencher le raccourci, sans indication visible du problème. Plutôt que de
+rapiécer, l'utilisateur a choisi de basculer sur une **interface web locale**
+(0.7.0, `githor web`), acceptant cette fois l'écart avec le principe
+d'origine — une TUI n'a pas suffi à l'éviter non plus, et le HTML/CSS donne
+un contrôle visuel qu'un terminal ne permet pas.
+
+Ce qui reste du principe d'origine, par choix, malgré le serveur : il
+n'écoute que sur `127.0.0.1` par défaut ([config.py](src/githor/config.py) —
+jamais exposé sur le réseau), aucune ressource (CSS, JS) n'est chargée depuis
+un CDN, pour que l'interface reste utilisable hors ligne, et la commande
+bloque le terminal tant qu'elle tourne, à l'arrêter par `Ctrl+C` — le même
+modèle mental qu'un `python -m http.server`, rien de caché en arrière-plan.
+
+**La TUI reste disponible** (`githor tui`, dépendance `textual`) : rien n'a
+été supprimé, elle n'est simplement plus mise en avant dans la documentation.
+
+Les deux interfaces partagent la même contrainte, pour la même raison que la
+première fois : cette version reste **volontairement en lecture seule**. De
+fond, `githor web` ne fait pas exception au reste du projet — elle ne
+connaît que `config`, `storage`, `exporters` et `reports`, jamais `cli.py`,
+qui l'invoque en sens inverse ; le détail d'un dépôt construit **exactement**
+le même `Report` que `githor report`/`githor tui`, simplement rendu en
+HTML/CSS plutôt qu'en Markdown ou en widgets terminal — le même geste que la
+coexistence déjà en place entre les renderers JSON/CSV/Markdown des exports.
+De circonstance : juger vite un résultat concret avant d'investir dans des
+actions qui demanderaient de gérer des tâches longues en arrière-plan sans
+bloquer la page.
 
 ### Un export ne remplace pas le précédent
 
@@ -311,8 +324,13 @@ multi-dépôts en langage naturel (§35, étapes 29 à 32), `githor ask`.
 
 La **0.6.0** ajoute la première interface graphique du projet : `githor tui`
 (étapes 33 à 36), une TUI Textual en lecture seule — liste des dépôts triée
-par score, détail d'un dépôt identique à `githor report`. Le détail est dans
-le [CHANGELOG](CHANGELOG.md).
+par score, détail d'un dépôt identique à `githor report`.
+
+La **0.7.0** revient sur ce choix : la TUI jugée trop pauvre à l'usage,
+`githor web` (étapes 37 à 40) la remplace comme interface recommandée — une
+interface web locale, en lecture seule elle aussi, avec le même contenu mais
+en HTML/CSS. La TUI reste disponible, sans être mise en avant. Le détail est
+dans le [CHANGELOG](CHANGELOG.md).
 
 ## Conventions
 
@@ -357,7 +375,8 @@ La question reste ouverte pour la V0.4.
 | **V0.3** | Project Intelligence : catégorie security, score dérivé, comparaison, historique | livrée |
 | V0.4 | AI Advisor : client Ollama, priorisation déterministe, `githor advise` | livrée |
 | 0.5.0 | Conseiller de projets multi-dépôts (§35), `githor ask` | livrée |
-| **0.6.0** | Interface graphique : TUI Textual (`githor tui`), lecture seule | livrée |
+| 0.6.0 | Interface graphique : TUI Textual (`githor tui`), lecture seule | livrée, non recommandée |
+| **0.7.0** | Interface web locale (`githor web`), lecture seule | livrée |
 
 Les couches sont séparées pour cela : `github/` ne connaît ni la base ni la CLI,
 les `collectors/` font le pont vers les modèles normalisés, les `rules/` ne

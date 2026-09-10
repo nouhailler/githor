@@ -7,8 +7,53 @@ projet respecte le [versionnement sémantique](https://semver.org/lang/fr/).
 
 Les étapes numérotées renvoient au plan de développement : les treize de la V0.1
 sont franchies, les étapes 14 à 18 constituent la V0.2, les étapes 19 à 23 la
-V0.3, les étapes 24 à 28 la V0.4, les étapes 29 à 32 la 0.5.0, et les étapes
-33 à 36 la 0.6.0.
+V0.3, les étapes 24 à 28 la V0.4, les étapes 29 à 32 la 0.5.0, les étapes 33 à
+36 la 0.6.0, et les étapes 37 à 40 la 0.7.0.
+
+## [0.7.0] — 2026-09-10
+
+**Interface web locale.** La TUI de la 0.6.0 a été jugée trop pauvre à
+l'usage, avec un défaut réel : le focus initial dans le champ de filtre
+capturait `q`, le raccourci pour quitter. Plutôt que de la corriger,
+l'utilisateur a choisi de basculer sur une interface web locale — acceptant
+cette fois l'écart avec le principe d'origine (« pas de service, pas de
+serveur »), documenté comme une décision assumée dans CONTEXT.md. La TUI
+reste disponible, simplement plus mise en avant.
+
+### Ajouté
+
+- **Squelette Flask et page de liste** *(étape 37)*, `githor.web`.
+  - page `/` : les dépôts triés par score décroissant, comme `githor
+    compare`, construits depuis le même `Dataset` — aucune donnée ni requête
+    nouvelle ;
+  - score global mis en valeur par une pastille colorée (vert/orange/rouge
+    selon le seuil), plutôt qu'un nombre nu ;
+  - un champ filtre la liste par nom, en JavaScript natif, sans aller-retour
+    serveur ni framework ;
+  - feuille de style écrite à la main, servie localement — aucune ressource
+    chargée depuis un CDN, pour que l'interface reste utilisable hors ligne.
+- **Page de détail d'un dépôt** *(étape 38)*.
+  - `/repos/<dépôt>` construit **exactement** le même `Report` que `githor
+    report`/`githor tui` (`build_report`), simplement rendu en HTML plutôt
+    qu'en Markdown ou en widgets terminal — la même coexistence de renderers
+    déjà en place entre les exports JSON/CSV/Markdown ;
+  - dépôt inconnu : une page 404 propre, pas une exception.
+- **Commande `githor web`** *(étape 39)*.
+  - nouvelle section `[web]` dans la configuration (`host`, `port`) ; `host`
+    vaut `127.0.0.1` par défaut — jamais exposée sur le réseau ;
+  - `--host`/`--port` remplacent ponctuellement la configuration ;
+  - `--browser/--no-browser` ouvre (ou non) automatiquement un onglet ;
+  - bloque le terminal tant qu'elle tourne, `Ctrl+C` l'arrête — le même
+    modèle mental qu'un `python -m http.server` ;
+  - ne joint jamais GitHub : comme `report`, `findings`, `compare`, `advise`
+    et `ask`, elle ne relit que la base.
+
+### Documenté
+
+- `CONTEXT.md` révise la décision « TUI plutôt que web » de la 0.6.0 : la
+  TUI n'a pas suffi à éviter l'écart avec le principe d'origine, ce qui
+  restait à préserver malgré un serveur (écoute locale uniquement, aucune
+  ressource distante, rien en arrière-plan) est documenté explicitement.
 
 ## [0.6.0] — 2026-09-09
 
