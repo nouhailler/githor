@@ -5,12 +5,13 @@ GitHub, d'en collecter les métadonnées, d'en suivre l'évolution dans le temps
 (*snapshots*), d'en analyser le code source, d'en extraire des métriques et de
 détecter ce qui manque à chaque projet (*findings*).
 
-> **État : 0.7.0.** L'inventaire (`scan`, `findings`, `export`, `report`),
+> **État : 0.8.0.** L'inventaire (`scan`, `findings`, `export`, `report`),
 > l'analyse du code (`mirror`, `audit`), la comparaison et le score dérivé des
 > constats (`compare`), le conseiller IA par dépôt et sur l'ensemble du parc
-> (`advise`, `ask`, via un modèle Ollama local), et une interface web locale
-> en lecture seule (`web`) sont livrés. Détail complet dans le
-> [CHANGELOG](CHANGELOG.md).
+> (`advise`, `ask`, via un modèle Ollama local), une interface web locale
+> en lecture seule (`web`) et des contrôles éditoriaux sur les sites publiés
+> (mentions légales, à propos, lien, mise à jour auto) sont livrés. Détail
+> complet dans le [CHANGELOG](CHANGELOG.md).
 
 Pour aller plus loin : [CONTEXT.md](CONTEXT.md) explique les partis pris et
 les invariants du projet, [CHANGELOG.md](CHANGELOG.md) retrace ce qui a été
@@ -558,7 +559,11 @@ Constats ouverts (5)
 | `infrastructure.docker` | faible | `Dockerfile` ou `Containerfile` |
 | `security.dependabot` | faible | `.github/dependabot.yml` |
 | `security.policy` | moyenne | fichier `SECURITY.md` |
+| `editorial.legal_notice` | moyenne | mention légale (page dédiée, README ou page d'accueil) |
+| `editorial.about` | faible | section « à propos » (page dédiée, README ou page d'accueil) |
+| `editorial.swinux_link` | faible | lien vers `swinux.ch` (`homepage` du dépôt, README ou page d'accueil) |
 | `maintenance.activity` | moyenne | aucun push depuis 180 jours |
+| `maintenance.auto_update` | moyenne | dépendance de mise à jour auto connue (`vite-plugin-pwa`...) dans `package.json` |
 
 `security.dependabot` s'appelait `infrastructure.dependabot` avant la V0.3 : les
 constats déjà enregistrés sous l'ancien identifiant restent en base, inchangés —
@@ -566,6 +571,11 @@ un rapport tiré d'un snapshot antérieur continue de les citer tels quels.
 
 Un dépôt **archivé** ne se voit pas reprocher son inactivité : son immobilité est
 voulue.
+
+Les règles `editorial.*` et `maintenance.auto_update` sont les seules à lire le
+**contenu** de quelques fichiers plutôt que leur seul nom — une exception bornée
+documentée dans [CONTEXT.md](CONTEXT.md), section « Un signal de contenu, une
+exception bornée au marqueur ».
 
 ### Deux partis pris
 
@@ -596,7 +606,9 @@ MarkerRule(
 
 Une règle qui demande une logique propre dérive de `Rule` et implémente `check()`,
 comme `InactivityRule`. Elle ne connaît ni GitHub ni SQLite : elle lit un
-`RuleContext` déjà collecté et rend un `Verdict`.
+`RuleContext` déjà collecté et rend un `Verdict`. `ContentSignalRule` suit le
+même principe que `MarkerRule`, pour un signal établi par lecture de contenu
+(`githor.collectors.content`) plutôt que par un simple nom de fichier.
 
 ## Comparaison
 
@@ -1062,7 +1074,8 @@ Les tests n'utilisent **jamais** de token GitHub réel : le transport HTTP est m
 | V0.4 | AI Advisor : client Ollama local, priorisation déterministe, `githor advise` |
 | 0.5.0 | Conseiller de projets multi-dépôts (§35) : `githor ask`, en langage naturel |
 | 0.6.0 | Interface graphique : `githor tui`, une TUI Textual en lecture seule |
-| **0.7.0** | Interface web locale : `githor web`, en lecture seule (recommandée) |
+| 0.7.0 | Interface web locale : `githor web`, en lecture seule (recommandée) |
+| **0.8.0** | Contrôles éditoriaux : mentions légales, à propos, lien, mise à jour auto |
 
 ## Licence
 

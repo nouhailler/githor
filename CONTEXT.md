@@ -80,6 +80,29 @@ trouvé dans l'arborescence relevée ». Le message cite le chemin qui l'a motiv
 jamais un simple booléen. Pas de score composite, pas d'heuristique floue : ce
 qui n'est pas vérifiable à la main n'a pas sa place dans la V0.1.
 
+### Un signal de contenu, une exception bornée au marqueur
+
+Jusqu'à la 0.8.0, un marqueur ne regardait qu'un **nom** de fichier ou de
+répertoire, jamais son contenu — le module `collectors/structure.py` l'a
+toujours dit explicitement. Ce choix tenait tant que chaque constat pouvait
+se réduire à « ce fichier existe-t-il ? ».
+
+Il a cessé de suffire avec les contrôles de conformité éditoriale des sites
+publiés par l'utilisateur : une mention légale, une section « à propos » ou
+un lien vers son propre site (`swinux.ch`) ne portent pas un nom de fichier
+prévisible, seulement du texte — et sa mise à jour automatique se reconnaît
+à une **dépendance** (`vite-plugin-pwa`, sur le modèle d'Astror), pas à un
+fichier au nom particulier à ce seul projet. Githor lit donc, pour la
+première fois, le **contenu** de quelques fichiers.
+
+**Ce qui reste borné, par choix** : seul un ensemble fixe et court de
+fichiers déjà repérés par marqueur est récupéré par dépôt — le README, une
+page légale/« à propos » candidate, la page d'accueil, `package.json` — au
+plus cinq appels, jamais un scan de l'arborescence entière. La fonction qui
+porte cette exception, `githor.collectors.content.collect_content_signals`,
+documente ce périmètre dans son propre docstring, pour qu'il reste visible
+sans revenir ici.
+
 ### Les règles satisfaites sont enregistrées elles aussi
 
 Statut `ok`, gravité `info`. La table `findings` porte donc, pour chaque
@@ -376,7 +399,8 @@ La question reste ouverte pour la V0.4.
 | V0.4 | AI Advisor : client Ollama, priorisation déterministe, `githor advise` | livrée |
 | 0.5.0 | Conseiller de projets multi-dépôts (§35), `githor ask` | livrée |
 | 0.6.0 | Interface graphique : TUI Textual (`githor tui`), lecture seule | livrée, non recommandée |
-| **0.7.0** | Interface web locale (`githor web`), lecture seule | livrée |
+| 0.7.0 | Interface web locale (`githor web`), lecture seule | livrée |
+| **0.8.0** | Contrôles éditoriaux (mentions légales, à propos, lien, mise à jour auto) | livrée |
 
 Les couches sont séparées pour cela : `github/` ne connaît ni la base ni la CLI,
 les `collectors/` font le pont vers les modèles normalisés, les `rules/` ne

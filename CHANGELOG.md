@@ -8,7 +8,43 @@ projet respecte le [versionnement sémantique](https://semver.org/lang/fr/).
 Les étapes numérotées renvoient au plan de développement : les treize de la V0.1
 sont franchies, les étapes 14 à 18 constituent la V0.2, les étapes 19 à 23 la
 V0.3, les étapes 24 à 28 la V0.4, les étapes 29 à 32 la 0.5.0, les étapes 33 à
-36 la 0.6.0, et les étapes 37 à 40 la 0.7.0.
+36 la 0.6.0, les étapes 37 à 40 la 0.7.0, et les étapes 41 à 45 la 0.8.0.
+
+## [0.8.0] — 2026-09-11
+
+**Contrôles éditoriaux.** Quatre nouveaux constats sur la conformité des
+sites publiés — mentions légales, section « à propos », lien vers
+`swinux.ch`, mise à jour automatique — dont aucun ne se réduit à la
+présence d'un fichier au nom prévisible. Githor lit donc, pour la première
+fois, le **contenu** d'un petit nombre de fichiers déjà repérés par
+marqueur, une exception bornée à l'invariant du V0.1, documentée comme une
+décision assumée dans CONTEXT.md.
+
+### Ajouté
+
+- **Lecture bornée du contenu d'un fichier** *(étape 41)*,
+  `githor.github.repositories.get_content` — API contents de GitHub,
+  décodage base64 ; fichier introuvable, répertoire ou contenu binaire ne
+  sont pas des échecs de scan, seulement l'absence d'un signal.
+- **Nouveaux marqueurs et champ `homepage`** *(étape 42)* : trois marqueurs
+  de nom de fichier (`legal_notice`, `about_page`, `index_html`), et le
+  champ `homepage`, présent dans l'API GitHub mais jusque-là non collecté.
+- **Signaux de contenu** *(étape 43)*, `githor.collectors.content` — pour
+  les marqueurs présents (README, page légale/à propos candidate, page
+  d'accueil, `package.json`), dérive quatre signaux : mention légale,
+  section à propos, lien vers `swinux.ch`, dépendance de mise à jour
+  automatique connue (`vite-plugin-pwa` et équivalents, sur le modèle
+  d'Astror).
+- **Nouvelles règles** *(étape 44)* : `editorial.legal_notice`,
+  `editorial.about`, `editorial.swinux_link` (nouvelle catégorie
+  `editorial`) et `maintenance.auto_update` — `ContentSignalRule`, même
+  principe que `MarkerRule` pour un signal établi par lecture de contenu.
+
+### Documenté
+
+- `CONTEXT.md` documente l'exception à l'invariant « un marqueur ne lit
+  qu'un nom, jamais un contenu » : ce qui la motive, et ce qui reste borné
+  malgré elle (un nombre fixe et court de fichiers par dépôt).
 
 ## [0.7.0] — 2026-09-10
 
