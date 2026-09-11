@@ -167,8 +167,8 @@ RULES: tuple[Rule, ...] = (
         signal="auto_update",
         found_message="Dépendance de mise à jour automatique détectée dans package.json.",
         missing_message="Aucune dépendance de mise à jour automatique connue dans package.json.",
-        recommendation="Intégrer un mécanisme de mise à jour automatique (ex. vite-plugin-pwa), "
-        "sur le modèle déjà en place dans Astror (src/pwaUpdate.js).",
+        recommendation="Intégrer un mécanisme de mise à jour automatique côté client "
+        "(ex. vite-plugin-pwa).",
     ),
 )
 """Règles appliquées à chaque snapshot, dans l'ordre d'affichage."""

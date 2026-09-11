@@ -33,8 +33,8 @@ décision assumée dans CONTEXT.md.
   les marqueurs présents (README, page légale/à propos candidate, page
   d'accueil, `package.json`), dérive quatre signaux : mention légale,
   section à propos, lien vers `swinux.ch`, dépendance de mise à jour
-  automatique connue (`vite-plugin-pwa` et équivalents, sur le modèle
-  d'Astror).
+  automatique connue (`vite-plugin-pwa` et équivalents, repérée à titre
+  d'exemple dans Astror).
 - **Nouvelles règles** *(étape 44)* : `editorial.legal_notice`,
   `editorial.about`, `editorial.swinux_link` (nouvelle catégorie
   `editorial`) et `maintenance.auto_update` — `ContentSignalRule`, même

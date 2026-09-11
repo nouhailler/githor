@@ -91,9 +91,10 @@ Il a cessé de suffire avec les contrôles de conformité éditoriale des sites
 publiés par l'utilisateur : une mention légale, une section « à propos » ou
 un lien vers son propre site (`swinux.ch`) ne portent pas un nom de fichier
 prévisible, seulement du texte — et sa mise à jour automatique se reconnaît
-à une **dépendance** (`vite-plugin-pwa`, sur le modèle d'Astror), pas à un
-fichier au nom particulier à ce seul projet. Githor lit donc, pour la
-première fois, le **contenu** de quelques fichiers.
+à une **dépendance** (`vite-plugin-pwa`, repérée à titre d'exemple dans
+Astror — un dépôt parmi d'autres, pas une référence), pas à un fichier au
+nom particulier à ce seul projet. Githor lit donc, pour la première fois,
+le **contenu** de quelques fichiers.
 
 **Ce qui reste borné, par choix** : seul un ensemble fixe et court de
 fichiers déjà repérés par marqueur est récupéré par dépôt — le README, une

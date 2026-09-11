@@ -36,9 +36,10 @@ AUTO_UPDATE_DEPENDENCIES: tuple[str, ...] = (
 )
 """Dépendances connues assurant une mise à jour automatique côté client.
 
-Établi sur le modèle d'Astror (``src/pwaUpdate.js``, ``registerSW()``) :
-une dépendance plutôt qu'un nom de fichier, pour généraliser à des projets
-qui n'organisent pas leur code de la même façon.
+Une dépendance plutôt qu'un nom de fichier (repéré à titre d'exemple dans
+Astror, ``src/pwaUpdate.js`` → ``registerSW()``, sans que ce projet ne fasse
+référence) : cela généralise à des projets qui n'organisent pas leur code de
+la même façon.
 """
 
 
