@@ -51,6 +51,7 @@ def normalise_repository(payload: dict[str, Any]) -> Repository:
             full_name=payload["full_name"],
             owner=(owner or {}).get("login", ""),
             description=payload.get("description"),
+            homepage=payload.get("homepage") or None,
             html_url=payload.get("html_url", ""),
             clone_url=payload.get("clone_url"),
             ssh_url=payload.get("ssh_url"),

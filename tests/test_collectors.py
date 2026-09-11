@@ -145,6 +145,21 @@ def test_null_license_becomes_none() -> None:
     assert normalise_repository(payload(license=None)).license is None
 
 
+def test_homepage_is_normalised() -> None:
+    assert (
+        normalise_repository(payload(homepage="https://swinux.ch")).homepage == "https://swinux.ch"
+    )
+
+
+def test_empty_homepage_becomes_none() -> None:
+    """GitHub renvoie parfois une chaîne vide plutôt qu'un ``null``."""
+    assert normalise_repository(payload(homepage="")).homepage is None
+
+
+def test_missing_homepage_is_none() -> None:
+    assert normalise_repository(MINIMAL_PAYLOAD).homepage is None
+
+
 def test_visibility_falls_back_on_the_private_flag() -> None:
     without_visibility = {key: value for key, value in FULL_PAYLOAD.items() if key != "visibility"}
 
@@ -388,6 +403,11 @@ def test_marker_detection_ignores_case() -> None:
         ("Dockerfile", "dockerfile"),
         ("package-lock.json", "package_lock"),
         ("pnpm-lock.yaml", "package_lock"),
+        ("mentions-legales.html", "legal_notice"),
+        ("legal.html", "legal_notice"),
+        ("a-propos.html", "about_page"),
+        ("about.html", "about_page"),
+        ("index.html", "index_html"),
     ],
 )
 def test_marker_variants_are_recognised(path: str, marker: str) -> None:

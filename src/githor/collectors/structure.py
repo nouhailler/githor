@@ -40,6 +40,9 @@ FILE_MARKERS: dict[str, tuple[str, ...]] = {
     "requirements": ("requirements.txt",),
     "editorconfig": (".editorconfig",),
     "gitignore": (".gitignore",),
+    "legal_notice": ("mentions-legales.html", "mentions_legales.html", "legal.html"),
+    "about_page": ("a-propos.html", "a_propos.html", "about.html"),
+    "index_html": ("index.html",),
 }
 """Marqueurs identifiés par un chemin exact, comparé sans tenir compte de la casse."""
 

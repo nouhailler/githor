@@ -24,6 +24,7 @@ class Repository(BaseModel):
     full_name: str
     owner: str
     description: str | None = None
+    homepage: str | None = None
 
     # ── Adresses ─────────────────────────────────────────────────────────────
     html_url: str
