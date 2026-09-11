@@ -29,6 +29,15 @@ class RuleContext:
     markers: Mapping[str, str | None] = field(default_factory=dict)
     """Marqueur -> chemin qui l'a satisfait, tel que produit par les collectors."""
 
+    content_signals: Mapping[str, bool] = field(default_factory=dict)
+    """Signal de contenu -> détecté ou non, tel que produit par
+    :func:`githor.collectors.content.collect_content_signals`.
+
+    Exception bornée à l'invariant du marqueur : ces signaux, contrairement à
+    ``markers``, proviennent de la lecture du contenu d'un petit nombre de
+    fichiers, jamais de leur seul nom (cf. CONTEXT.md).
+    """
+
     activity: Activity | None = None
     now: datetime = field(default_factory=utc_now)
     """Instant de référence, injectable pour rendre les règles testables."""
@@ -36,6 +45,10 @@ class RuleContext:
     def marker(self, name: str) -> str | None:
         """Chemin ayant satisfait un marqueur, ou ``None`` s'il est absent."""
         return self.markers.get(name)
+
+    def content_signal(self, name: str) -> bool:
+        """Signal de contenu détecté, ou ``False`` s'il est absent."""
+        return self.content_signals.get(name, False)
 
     @property
     def last_activity_at(self) -> datetime | None:
@@ -118,6 +131,29 @@ class MarkerRule(Rule):
         if found is not None:
             return Verdict(True, f"{self.label} présent : {found}.")
         return Verdict(False, f"{self.label} absent.", self.recommendation)
+
+
+@dataclass(frozen=True)
+class ContentSignalRule(Rule):
+    """Règle satisfaite dès qu'un signal de contenu pré-calculé est vrai.
+
+    Même esprit que :class:`MarkerRule`, mais le signal a été établi en
+    lisant le contenu d'un fichier (cf. :mod:`githor.collectors.content`),
+    pas seulement son nom — l'exception bornée à l'invariant du marqueur.
+    """
+
+    signal: str
+    """Nom du signal, tel que produit par ``collect_content_signals``."""
+
+    found_message: str
+    missing_message: str
+    recommendation: str
+
+    def check(self, context: RuleContext) -> Verdict:
+        """Cherche le signal dans le contenu déjà collecté."""
+        if context.content_signal(self.signal):
+            return Verdict(True, self.found_message)
+        return Verdict(False, self.missing_message, self.recommendation)
 
 
 @dataclass(frozen=True)

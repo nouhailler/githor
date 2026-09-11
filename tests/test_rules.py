@@ -238,6 +238,73 @@ def test_the_most_recent_of_push_and_commit_dates_is_used() -> None:
     assert context.last_activity_at == repository.pushed_at
 
 
+# ── Éditorial et mise à jour automatique (étape 44) ─────────────────────────
+
+
+def test_a_detected_legal_notice_satisfies_its_rule() -> None:
+    finding = finding_for(
+        evaluate(context_for("README.md", content_signals={"legal_notice": True})),
+        "editorial.legal_notice",
+    )
+
+    assert finding.status is Status.OK
+    assert finding.severity is Severity.INFO
+
+
+def test_a_missing_legal_notice_opens_a_medium_finding() -> None:
+    finding = finding_for(evaluate(context_for("README.md")), "editorial.legal_notice")
+
+    assert finding.status is Status.OPEN
+    assert finding.severity is Severity.MEDIUM
+    assert finding.recommendation
+
+
+def test_a_detected_about_section_satisfies_its_rule() -> None:
+    finding = finding_for(
+        evaluate(context_for("README.md", content_signals={"about": True})), "editorial.about"
+    )
+
+    assert finding.status is Status.OK
+
+
+def test_a_missing_about_section_opens_a_low_finding() -> None:
+    finding = finding_for(evaluate(context_for("README.md")), "editorial.about")
+
+    assert finding.status is Status.OPEN
+    assert finding.severity is Severity.LOW
+
+
+def test_a_detected_swinux_link_satisfies_its_rule() -> None:
+    finding = finding_for(
+        evaluate(context_for("README.md", content_signals={"swinux_link": True})),
+        "editorial.swinux_link",
+    )
+
+    assert finding.status is Status.OK
+
+
+def test_a_missing_swinux_link_opens_a_finding() -> None:
+    finding = finding_for(evaluate(context_for("README.md")), "editorial.swinux_link")
+
+    assert finding.status is Status.OPEN
+
+
+def test_a_detected_auto_update_dependency_satisfies_its_rule() -> None:
+    finding = finding_for(
+        evaluate(context_for("README.md", content_signals={"auto_update": True})),
+        "maintenance.auto_update",
+    )
+
+    assert finding.status is Status.OK
+
+
+def test_a_missing_auto_update_dependency_opens_a_medium_finding() -> None:
+    finding = finding_for(evaluate(context_for("README.md")), "maintenance.auto_update")
+
+    assert finding.status is Status.OPEN
+    assert finding.severity is Severity.MEDIUM
+
+
 # ── Moteur ───────────────────────────────────────────────────────────────────
 
 
@@ -270,6 +337,12 @@ def test_a_complete_repository_has_no_open_finding() -> None:
             ".github/dependabot.yml",
             "SECURITY.md",
             "Dockerfile",
+            content_signals={
+                "legal_notice": True,
+                "about": True,
+                "swinux_link": True,
+                "auto_update": True,
+            },
         )
     )
 

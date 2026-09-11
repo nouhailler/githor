@@ -1,5 +1,6 @@
 """Tests de la CLI : aide, version, options globales, erreurs, `config show`."""
 
+import base64
 import csv
 import io
 import json
@@ -494,6 +495,14 @@ def repository_details(httpx_mock: HTTPXMock) -> None:
                 "published_at": "2026-08-01T09:00:00Z",
             }
         ],
+        is_reusable=True,
+    )
+    httpx_mock.add_response(
+        url=re.compile(r".*/contents/.*"),
+        json={
+            "encoding": "base64",
+            "content": base64.b64encode(b"# Un projet\n\nSans autre section.").decode(),
+        },
         is_reusable=True,
     )
     httpx_mock.add_response(

@@ -25,6 +25,7 @@ from githor.analysis.advisor import generate_advice
 from githor.analysis.audit import audit_checkout
 from githor.analysis.portfolio_advisor import answer_question
 from githor.collectors.activity import collect_activity
+from githor.collectors.content import collect_content_signals
 from githor.collectors.issues import collect_issues
 from githor.collectors.languages import collect_languages
 from githor.collectors.releases import collect_releases
@@ -489,13 +490,19 @@ def _persist(
 
             languages = collect_languages(client, repository.full_name)
             structure = collect_structure(client, repository)
+            content_signals = collect_content_signals(client, repository, structure.markers)
             activity = collect_activity(
                 client, repository.full_name, days=scope.commit_history_days
             )
             releases = collect_releases(client, repository.full_name)
             issues = collect_issues(client, repository.full_name)
             findings = evaluate(
-                RuleContext(repository=repository, markers=structure.markers, activity=activity)
+                RuleContext(
+                    repository=repository,
+                    markers=structure.markers,
+                    content_signals=content_signals.signals,
+                    activity=activity,
+                )
             )
             opened = len(open_findings(findings))
 

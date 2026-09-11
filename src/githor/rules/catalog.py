@@ -9,13 +9,14 @@ ce qui relève du confort est ``low``.
 """
 
 from githor.models.finding import Severity
-from githor.rules.base import InactivityRule, MarkerRule, Rule
+from githor.rules.base import ContentSignalRule, InactivityRule, MarkerRule, Rule
 
 STALE_AFTER_DAYS = 180
 """Seuil d'inactivité : six mois sans push valent un constat."""
 
 CATEGORIES: tuple[str, ...] = (
     "documentation",
+    "editorial",
     "development",
     "infrastructure",
     "security",
@@ -25,6 +26,7 @@ CATEGORIES: tuple[str, ...] = (
 
 CATEGORY_LABELS: dict[str, str] = {
     "documentation": "Documentation",
+    "editorial": "Éditorial (site public)",
     "development": "Development",
     "infrastructure": "Infrastructure",
     "security": "Security",
@@ -116,6 +118,39 @@ RULES: tuple[Rule, ...] = (
         marker="security",
         recommendation="Ajouter un SECURITY.md décrivant comment signaler une vulnérabilité.",
     ),
+    ContentSignalRule(
+        id="editorial.legal_notice",
+        category="editorial",
+        label="Mentions légales",
+        severity=Severity.MEDIUM,
+        signal="legal_notice",
+        found_message="Mentions légales détectées.",
+        missing_message="Aucune mention légale détectée (page dédiée, README ou page d'accueil).",
+        recommendation="Ajouter une page ou une section « mentions légales », "
+        "obligatoire pour un site publié.",
+    ),
+    ContentSignalRule(
+        id="editorial.about",
+        category="editorial",
+        label="À propos",
+        severity=Severity.LOW,
+        signal="about",
+        found_message="Section « à propos » détectée.",
+        missing_message="Aucune section « à propos » détectée.",
+        recommendation="Ajouter une page ou une section « à propos » présentant "
+        "le projet ou son auteur.",
+    ),
+    ContentSignalRule(
+        id="editorial.swinux_link",
+        category="editorial",
+        label="Lien vers swinux.ch",
+        severity=Severity.LOW,
+        signal="swinux_link",
+        found_message="Lien vers swinux.ch détecté.",
+        missing_message="Aucun lien vers swinux.ch détecté.",
+        recommendation="Ajouter un lien vers swinux.ch (champ « homepage » du dépôt, "
+        "README ou page d'accueil).",
+    ),
     InactivityRule(
         id="maintenance.activity",
         category="maintenance",
@@ -123,6 +158,17 @@ RULES: tuple[Rule, ...] = (
         severity=Severity.MEDIUM,
         stale_after_days=STALE_AFTER_DAYS,
         recommendation="Reprendre le projet ou l'archiver, pour que son état reflète l'intention.",
+    ),
+    ContentSignalRule(
+        id="maintenance.auto_update",
+        category="maintenance",
+        label="Mise à jour automatique",
+        severity=Severity.MEDIUM,
+        signal="auto_update",
+        found_message="Dépendance de mise à jour automatique détectée dans package.json.",
+        missing_message="Aucune dépendance de mise à jour automatique connue dans package.json.",
+        recommendation="Intégrer un mécanisme de mise à jour automatique (ex. vite-plugin-pwa), "
+        "sur le modèle déjà en place dans Astror (src/pwaUpdate.js).",
     ),
 )
 """Règles appliquées à chaque snapshot, dans l'ordre d'affichage."""
