@@ -4,12 +4,14 @@ Ce module se contente d'appeler les bonnes routes et de renvoyer le JSON brut.
 Aucune normalisation ici : elle relève de :mod:`githor.collectors.repositories`.
 """
 
+import base64
+import binascii
 from collections.abc import Iterator
 from datetime import datetime
 from typing import Any
 
 from githor.github.client import GitHubClient
-from githor.github.errors import InvalidResponseError
+from githor.github.errors import InvalidResponseError, NotFoundError
 from githor.logging import get_logger
 
 logger = get_logger("github.repositories")
@@ -18,6 +20,7 @@ USER_REPOS_PATH = "/user/repos"
 REPOSITORY_PATH = "/repos/{full_name}"
 LANGUAGES_PATH = "/repos/{full_name}/languages"
 TREE_PATH = "/repos/{full_name}/git/trees/{ref}"
+CONTENT_PATH = "/repos/{full_name}/contents/{path}"
 COMMITS_PATH = "/repos/{full_name}/commits"
 RELEASES_PATH = "/repos/{full_name}/releases"
 ISSUES_PATH = "/repos/{full_name}/issues"
@@ -102,6 +105,32 @@ def get_tree(client: GitHubClient, full_name: str, ref: str) -> dict[str, Any]:
             f"Arborescence inattendue pour {full_name}@{ref} : objet JSON attendu."
         )
     return payload
+
+
+def get_content(client: GitHubClient, full_name: str, path: str, ref: str) -> str | None:
+    """Récupère le contenu textuel d'un fichier, ou ``None`` s'il est inexploitable.
+
+    Exception bornée à l'invariant du V0.1 (« un marqueur ne lit qu'un nom,
+    jamais un contenu ») : réservée aux quelques fichiers déjà repérés par
+    marqueur (cf. :mod:`githor.collectors.content`), jamais à l'arborescence
+    entière. GitHub encode le contenu en base64 pour les fichiers de moins
+    d'1 Mo ; un fichier introuvable, un répertoire ou un contenu binaire ne
+    sont pas des échecs de scan, seulement l'absence d'un signal.
+    """
+    try:
+        payload = client.get(
+            CONTENT_PATH.format(full_name=full_name, path=path), params={"ref": ref}
+        )
+    except NotFoundError:
+        return None
+
+    if not isinstance(payload, dict) or payload.get("encoding") != "base64":
+        return None
+
+    try:
+        return base64.b64decode(payload.get("content", "")).decode("utf-8")
+    except (binascii.Error, UnicodeDecodeError):
+        return None
 
 
 def list_commits(

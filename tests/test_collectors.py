@@ -3,6 +3,7 @@
 Les réponses GitHub sont mockées : aucun appel réseau, aucun jeton réel.
 """
 
+import base64
 import re
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -24,6 +25,7 @@ from githor.collectors.structure import collect_structure, detect_markers, norma
 from githor.config import ScanConfig
 from githor.github.client import DEFAULT_API_URL, GitHubClient
 from githor.github.errors import InvalidResponseError
+from githor.github.repositories import get_content
 from githor.models.repository import Repository
 from githor.utils.dates import parse_datetime, utc_now
 
@@ -432,6 +434,53 @@ def test_structure_uses_the_default_branch(httpx_mock: HTTPXMock) -> None:
     assert request is not None
     assert request.url.path.endswith("/git/trees/develop")
     assert request.url.params["recursive"] == "1"
+
+
+# ── Contenu (étape 41) ───────────────────────────────────────────────────────
+
+
+def test_get_content_decodes_base64(httpx_mock: HTTPXMock) -> None:
+    encoded = base64.b64encode(b"# Astror\n\nUn projet.").decode()
+    httpx_mock.add_response(json={"encoding": "base64", "content": encoded})
+
+    with GitHubClient("ghp_test") as client:
+        content = get_content(client, "nouhailler/Astror", "README.md", "main")
+
+    assert content == "# Astror\n\nUn projet."
+
+
+def test_get_content_of_a_missing_file_is_none(httpx_mock: HTTPXMock) -> None:
+    httpx_mock.add_response(status_code=404, json={"message": "Not Found"})
+
+    with GitHubClient("ghp_test", max_retries=0) as client:
+        assert get_content(client, "nouhailler/Astror", "legal.html", "main") is None
+
+
+def test_get_content_of_a_directory_is_none(httpx_mock: HTTPXMock) -> None:
+    """L'API renvoie une liste pour un répertoire : aucun encodage base64 à décoder."""
+    httpx_mock.add_response(json=[{"name": "README.md", "type": "file"}])
+
+    with GitHubClient("ghp_test") as client:
+        assert get_content(client, "nouhailler/Astror", "docs", "main") is None
+
+
+def test_get_content_of_binary_data_is_none(httpx_mock: HTTPXMock) -> None:
+    encoded = base64.b64encode(b"\xff\xfe\x00\x01").decode()
+    httpx_mock.add_response(json={"encoding": "base64", "content": encoded})
+
+    with GitHubClient("ghp_test") as client:
+        assert get_content(client, "nouhailler/Astror", "logo.png", "main") is None
+
+
+def test_get_content_requests_the_given_ref(httpx_mock: HTTPXMock) -> None:
+    httpx_mock.add_response(json={"encoding": "base64", "content": base64.b64encode(b"x").decode()})
+
+    with GitHubClient("ghp_test") as client:
+        get_content(client, "nouhailler/Astror", "README.md", "develop")
+
+    request = httpx_mock.get_request()
+    assert request is not None
+    assert request.url.params["ref"] == "develop"
 
 
 # ── Activité ─────────────────────────────────────────────────────────────────
